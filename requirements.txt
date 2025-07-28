@@ -6,3 +6,4 @@ scikit-learn
 seaborn
 scikit-fuzzy
 networkx
+

@@ -150,9 +150,6 @@ class DetectorVazamentosColeipa:
             if len(dados['hora']) != 24:
                 st.warning(f"O número de horas no arquivo ({len(dados['hora'])}) é diferente do esperado (24).")
             
-            # Resetar o sistema fuzzy para forçar recriação com os novos dados
-            self.sistema_fuzzy = None
-            
             return dados
             
         except Exception as e:
@@ -309,8 +306,7 @@ class DetectorVazamentosColeipa:
         axes[1, 0].set_ylabel('Grau de Pertinência')
         axes[1, 0].legend()
         axes[1, 0].grid(True, alpha=0.3)
-        axes[1, 0].axvline(x=self.caracteristicas_sistema['ivi'], color='red', linestyle='--', 
-                          label=f"Coleipa ({self.caracteristicas_sistema['ivi']:.2f})")
+        axes[1, 0].axvline(x=16.33, color='red', linestyle='--', label='Coleipa (16.33)')
         
         # Risco
         axes[1, 1].clear()
@@ -399,142 +395,6 @@ class DetectorVazamentosColeipa:
         
         return fig, stats, df
     
-    def calcular_ivi_automatico(self, arquivo_uploaded=None):
-        """
-        Calcula o IVI (Índice de Vazamentos na Infraestrutura) automaticamente 
-        a partir dos dados de vazão e pressão
-        
-        Parâmetros:
-        arquivo_uploaded: Arquivo opcional com dados adicionais para o cálculo de IVI
-        
-        Retorna:
-        float: Valor calculado do IVI
-        dict: Dicionário com os componentes do cálculo (CARL, UARL, etc.)
-        """
-        # Criar dataframe com os dados de monitoramento
-        df_monitoramento = self.criar_dataframe_coleipa()
-        
-        # Extrair parâmetros do sistema
-        comprimento_rede = self.caracteristicas_sistema['comprimento_rede']  # km
-        numero_ligacoes = self.caracteristicas_sistema['numero_ligacoes']    # ligações
-        pressao_media = df_monitoramento['Pressao_Media'].mean()            # mca
-        
-        # Calcular vazão mínima noturna (média das horas 1-4)
-        horas_noturnas = df_monitoramento[(df_monitoramento['Hora'] >= 1) & (df_monitoramento['Hora'] <= 4)]
-        vazao_minima_noturna = horas_noturnas['Vazao_Media'].mean()  # m³/h
-        
-        # Tentar carregar dados adicionais do arquivo se fornecido
-        dados_adicionais = {}
-        if arquivo_uploaded:
-            try:
-                # Determinar tipo de arquivo pela extensão
-                nome_arquivo = arquivo_uploaded.name
-                nome, extensao = os.path.splitext(nome_arquivo)
-                extensao = extensao.lower()
-                
-                if extensao == '.xlsx' or extensao == '.xls':
-                    df_ivi = pd.read_excel(arquivo_uploaded, sheet_name='Calculo_IVI')
-                    st.success("Dados para cálculo de IVI carregados com sucesso")
-                elif extensao == '.csv':
-                    df_ivi = pd.read_csv(arquivo_uploaded)
-                    st.success("Dados para cálculo de IVI carregados com sucesso")
-                else:
-                    st.warning(f"Formato não suportado para cálculo automático do IVI: {extensao}")
-                    df_ivi = None
-                
-                # Se conseguimos carregar o arquivo, extrair dados relevantes
-                if df_ivi is not None:
-                    # Procurar colunas específicas no arquivo
-                    colunas_esperadas = ['volume_diario', 'consumo_autorizado', 'perdas_aparentes']
-                    if all(col in df_ivi.columns for col in colunas_esperadas):
-                        dados_adicionais = {
-                            'volume_diario': df_ivi['volume_diario'].mean(),
-                            'consumo_autorizado': df_ivi['consumo_autorizado'].mean(),
-                            'perdas_aparentes': df_ivi['perdas_aparentes'].mean()
-                        }
-                        st.success("Dados adicionais para cálculo do IVI encontrados!")
-                    else:
-                        st.info("Formato de arquivo reconhecido, mas colunas necessárias não encontradas.")
-                        st.info("Utilizando método alternativo para cálculo do IVI.")
-                        
-            except Exception as e:
-                st.warning(f"Erro ao processar arquivo para cálculo do IVI: {e}")
-                st.info("Utilizando método alternativo para cálculo do IVI.")
-        
-        # Método 1: Se temos dados completos do arquivo
-        if 'volume_diario' in dados_adicionais and 'consumo_autorizado' in dados_adicionais and 'perdas_aparentes' in dados_adicionais:
-            # Calcular perdas reais (CARL) em m³/dia
-            volume_diario = dados_adicionais['volume_diario']  # m³/dia
-            consumo_autorizado = dados_adicionais['consumo_autorizado']  # m³/dia
-            perdas_aparentes = dados_adicionais['perdas_aparentes']  # m³/dia
-            
-            perdas_reais = volume_diario - consumo_autorizado - perdas_aparentes  # m³/dia
-            
-        # Método 2: Baseado na vazão mínima noturna e estimativas
-        else:
-            # Estimar consumo noturno legítimo (tipicamente 6-8% do consumo diário)
-            consumo_noturno_perc = 0.07  # 7% é um valor típico
-            consumo_legitimo_noturno = vazao_minima_noturna * consumo_noturno_perc  # m³/h
-            
-            # Estimar vazamentos noturnos
-            vazamento_noturno = vazao_minima_noturna - consumo_legitimo_noturno  # m³/h
-            
-            # Converter para volume diário (fator N1 da metodologia FAVAD)
-            # O fator N1 relaciona a variação de vazamento com a pressão
-            fator_n1 = 1.15  # Valor típico entre 0.5 e 1.5
-            fator_dia_noite = 24 * ((pressao_media / pressao_media) ** fator_n1)
-            
-            # Calcular perdas reais diárias
-            perdas_reais = vazamento_noturno * fator_dia_noite  # m³/dia
-        
-        # Calcular UARL (Unavoidable Annual Real Losses) usando a fórmula padrão da IWA
-        # UARL (litros/dia) = (18 × Lm + 0.8 × Nc + 25 × Lp) × P
-        # Onde:
-        # Lm = comprimento da rede (km)
-        # Nc = número de ligações
-        # Lp = comprimento total de ramais (km) - estimado como Nc/densidade_ramais
-        # P = pressão média (mca)
-        
-        densidade_ramais = self.caracteristicas_sistema['densidade_ramais']
-        comprimento_ramais = numero_ligacoes / densidade_ramais  # km
-        
-        # Cálculo do UARL em litros/dia
-        uarl_litros_dia = (18 * comprimento_rede + 0.8 * numero_ligacoes + 25 * comprimento_ramais) * pressao_media
-        
-        # Converter para m³/dia
-        uarl_m3_dia = uarl_litros_dia / 1000
-        
-        # Calcular IPRL (Índice de Perdas Reais por Ligação)
-        iprl = perdas_reais / numero_ligacoes  # m³/ligação.dia
-        
-        # Calcular IPRI (Índice de Perdas Reais Inevitáveis)
-        ipri = uarl_m3_dia / numero_ligacoes  # m³/ligação.dia
-        
-        # Finalmente, calcular o IVI
-        ivi = iprl / ipri if ipri > 0 else 0
-        
-        # Atualizar características do sistema
-        self.caracteristicas_sistema['perdas_reais_media'] = perdas_reais
-        self.caracteristicas_sistema['iprl'] = iprl
-        self.caracteristicas_sistema['ipri'] = ipri
-        self.caracteristicas_sistema['ivi'] = ivi
-        
-        # Resetar sistema fuzzy para refletir o novo IVI
-        self.sistema_fuzzy = None
-        
-        # Preparar resultados detalhados
-        resultados = {
-            'vazao_minima_noturna': vazao_minima_noturna,
-            'pressao_media': pressao_media,
-            'perdas_reais': perdas_reais,
-            'uarl_m3_dia': uarl_m3_dia,
-            'iprl': iprl,
-            'ipri': ipri,
-            'ivi': ivi
-        }
-        
-        return ivi, resultados
-    
     def gerar_dados_baseados_coleipa(self, n_amostras=500):
         """Gera dados sintéticos baseados nas características do sistema Coleipa"""
         df_coleipa = self.criar_dataframe_coleipa()
@@ -562,7 +422,7 @@ class DetectorVazamentosColeipa:
         # Dados de vazamento
         vazao_vazamento = np.random.normal(vazao_vazamento_mean, vazao_vazamento_std, n_vazamento)
         pressao_vazamento = np.random.normal(pressao_vazamento_mean, pressao_vazamento_std, n_vazamento)
-        ivi_vazamento = np.random.normal(self.caracteristicas_sistema['ivi'], 3, n_vazamento)  # IVI similar ao Coleipa
+        ivi_vazamento = np.random.normal(16.33, 3, n_vazamento)  # IVI similar ao Coleipa
         
         # Combinar dados
         X = np.vstack([
@@ -631,7 +491,7 @@ class DetectorVazamentosColeipa:
         if pressao is None:
             pressao = 3.5   # Pressão baixa típica
         if ivi is None:
-            ivi = self.caracteristicas_sistema['ivi']   # IVI real do Coleipa
+            ivi = 16.33   # IVI real do Coleipa
         
         # Classificação baseada nos dados Coleipa
         if vazao < 9:
@@ -827,12 +687,9 @@ class DetectorVazamentosColeipa:
         if self.sistema_fuzzy is None:
             self.criar_sistema_fuzzy()
         
-        # Usar o IVI atual para a categoria "MUITO RUIM"
-        current_ivi = self.caracteristicas_sistema['ivi']
-        
         # Valores de IVI baseados na classificação do Banco Mundial
-        ivi_valores = [2, 6, 12, current_ivi]  # Representativos das categorias A, B, C, D
-        ivi_categorias = ['BOM (2.0)', 'REGULAR (6.0)', 'RUIM (12.0)', f'MUITO RUIM ({current_ivi:.2f})']
+        ivi_valores = [2, 6, 12, 18]  # Representativos das categorias A, B, C, D
+        ivi_categorias = ['BOM (2.0)', 'REGULAR (6.0)', 'RUIM (12.0)', 'MUITO RUIM (18.0)']
         ivi_classificacoes = ['Categoria A', 'Categoria B', 'Categoria C', 'Categoria D']
         
         # Valores para o mapa de calor baseados nos dados Coleipa
@@ -946,7 +803,7 @@ class DetectorVazamentosColeipa:
             if idx == 3:  # Último gráfico (IVI Muito Ruim) - destaque especial
                 ax.scatter([14.5], [3.5], color='red', s=300, marker='*', 
                           edgecolors='darkred', linewidth=3, label='Ponto Coleipa\n(IVI=16.33)', zorder=10)
-                ax.annotate(f'SISTEMA COLEIPA\n(Vazão=14.5, Pressão=3.5)\nIVI={current_ivi:.2f} - CRÍTICO', 
+                ax.annotate('SISTEMA COLEIPA\n(Vazão=14.5, Pressão=3.5)\nIVI=16.33 - CRÍTICO', 
                            xy=(14.5, 3.5), xytext=(11, 2.8),
                            arrowprops=dict(arrowstyle='->', color='red', lw=2),
                            fontsize=9, fontweight='bold', color='red',
@@ -1049,9 +906,6 @@ class DetectorVazamentosColeipa:
                 st.success(f"Característica '{chave}' atualizada para: {valor}")
             else:
                 st.warning(f"Aviso: Característica '{chave}' não existe no sistema")
-        
-        # Resetar sistema fuzzy para forçar recriação com novos parâmetros
-        self.sistema_fuzzy = None
 
 
 # Configuração da página Streamlit
@@ -1338,7 +1192,7 @@ def mostrar_pagina_fuzzy(detector):
         pressao_teste = st.slider("Pressão (mca)", 0.0, 10.0, 3.5, 0.1)
     
     with col3:
-        ivi_teste = st.slider("IVI", 1.0, 25.0, detector.caracteristicas_sistema['ivi'], 0.01)
+        ivi_teste = st.slider("IVI", 1.0, 25.0, 16.33, 0.01)
     
     if st.button("Calcular Risco Fuzzy"):
         with st.spinner("Calculando risco..."):
@@ -1484,8 +1338,8 @@ def mostrar_pagina_mapa_calor(detector):
     
     with col2:
         st.markdown("##### 🎯 Análise específica do Coleipa (IVI = 16.33):")
-        st.markdown(f"""
-        - As perdas reais são {detector.caracteristicas_sistema['ivi']:.2f} vezes maiores que as inevitáveis
+        st.markdown("""
+        - As perdas reais são 16.33 vezes maiores que as inevitáveis
         - Potencial de redução de perdas > 400 L/ramal.dia
         - Localização no mapa: zona vermelha (alto risco)
         - Combinação crítica: Vazão ALTA + Pressão BAIXA
@@ -1505,7 +1359,7 @@ def mostrar_pagina_mapa_calor(detector):
         st.markdown("**IVI RUIM (12.0):**  \nAmarelo-laranja (risco elevado)")
     
     with col4:
-        st.markdown(f"**IVI MUITO RUIM ({detector.caracteristicas_sistema['ivi']:.2f}):**  \nVermelho intenso (risco crítico)")
+        st.markdown("**IVI MUITO RUIM (18.0):**  \nVermelho intenso (risco crítico)")
 
 
 def mostrar_pagina_simulacao(detector):
@@ -1612,7 +1466,7 @@ def mostrar_pagina_analise_caso(detector):
                                 help="Valor típico para o Coleipa: 3.5 mca")
     
     with col3:
-        ivi = st.number_input("IVI", min_value=1.0, max_value=25.0, value=detector.caracteristicas_sistema['ivi'], step=0.01,
+        ivi = st.number_input("IVI", min_value=1.0, max_value=25.0, value=16.33, step=0.01,
                             help="IVI do Coleipa: 16.33 (Categoria D)")
     
     # Botão para executar análise
@@ -1746,7 +1600,7 @@ def mostrar_pagina_relatorio(detector):
             - **Recomendação**: {relatorio['classificacao']['recomendacao']}
             """)
             
-           # 5. Metodologia NPR - Priorização de Ações
+            # 5. Metodologia NPR - Priorização de Ações
             st.subheader("5. METODOLOGIA NPR - PRIORIZAÇÃO DE AÇÕES")
             
             # Criar tabela de prioridades
@@ -1783,158 +1637,108 @@ def mostrar_pagina_relatorio(detector):
             for i, recomendacao in enumerate(relatorio['recomendacoes'], 1):
                 st.markdown(f"- **Recomendação {i}**: {recomendacao}")
             
-            # 8. Análise de Impacto Econômico
-            st.subheader("8. ANÁLISE DE IMPACTO ECONÔMICO")
-            
-            # Estimativa de perda de água anual
-            perda_anual_m3 = relatorio['monitoramento']['perdas_reais'] * 365  # m³/ano
-            
-            # Valores de referência para custos
-            custo_agua_tratada = 1.50  # R$/m³ (valor médio para água tratada)
-            custo_energia = 0.80  # R$/m³ (custo de energia para bombeamento)
-            custo_manutencao = 0.50  # R$/m³ (custo de manutenção relacionado a perdas)
-            
-            # Cálculo dos custos
-            custo_anual_agua = perda_anual_m3 * custo_agua_tratada
-            custo_anual_energia = perda_anual_m3 * custo_energia
-            custo_anual_manutencao = perda_anual_m3 * custo_manutencao
-            custo_anual_total = custo_anual_agua + custo_anual_energia + custo_anual_manutencao
-            
-            # Estimativa de economia com redução de IVI
-            ivi_atual = relatorio['indicadores']['ivi']
-            ivi_alvo = 8.0  # Meta: redução para Categoria B
-            reducao_percentual = max(0, (ivi_atual - ivi_alvo) / ivi_atual * 100)
-            economia_potencial = custo_anual_total * (reducao_percentual / 100)
-            
-            # Exibição dos resultados econômicos em colunas
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.metric("Perda anual estimada", f"{perda_anual_m3:.0f} m³/ano")
-                st.metric("Custo anual com água tratada", f"R$ {custo_anual_agua:.2f}")
-                st.metric("Custo anual com energia", f"R$ {custo_anual_energia:.2f}")
-                st.metric("Custo anual com manutenção", f"R$ {custo_anual_manutencao:.2f}")
-            
-            with col2:
-                st.metric("Custo anual total", f"R$ {custo_anual_total:.2f}")
-                st.metric("Meta de redução do IVI", f"{ivi_atual:.2f} → {ivi_alvo:.2f} ({reducao_percentual:.1f}%)")
-                st.metric("Economia potencial anual", f"R$ {economia_potencial:.2f}")
-                payback_anos = 100000 / economia_potencial if economia_potencial > 0 else float('inf')
-                st.metric("Payback estimado (investimento de R$ 100.000)", f"{payback_anos:.1f} anos")
-            
-            # Gráfico de composição de custos
-            fig_custos, ax_custos = plt.subplots(figsize=(10, 6))
-            custos = [custo_anual_agua, custo_anual_energia, custo_anual_manutencao]
-            labels = ['Água Tratada', 'Energia', 'Manutenção']
-            colors = ['#3498db', '#2ecc71', '#e74c3c']
-            
-            ax_custos.pie(custos, labels=labels, autopct='%1.1f%%', startangle=90, colors=colors,
-                         wedgeprops=dict(width=0.5, edgecolor='w'))
-            ax_custos.axis('equal')
-            ax_custos.set_title('Composição dos Custos Relacionados às Perdas')
-            
-            st.pyplot(fig_custos)
-            
-            # 9. Plano de Ação
-            st.subheader("9. PLANO DE AÇÃO")
-            
-            # Tabela com plano de ação
-            plano_acao = [
-                {
-                    "Etapa": "Curto Prazo (0-6 meses)",
-                    "Ação": "Pesquisa de vazamentos não visíveis na rede",
-                    "Custo Estimado": "R$ 25.000,00",
-                    "Impacto Esperado": "Redução de 20% nas perdas"
-                },
-                {
-                    "Etapa": "Curto Prazo (0-6 meses)",
-                    "Ação": "Melhoria no tempo de reparo de vazamentos visíveis",
-                    "Custo Estimado": "R$ 10.000,00",
-                    "Impacto Esperado": "Redução de 5% nas perdas"
-                },
-                {
-                    "Etapa": "Médio Prazo (6-18 meses)",
-                    "Ação": "Instalação de VRPs em pontos críticos",
-                    "Custo Estimado": "R$ 40.000,00",
-                    "Impacto Esperado": "Redução de 15% nas perdas"
-                },
-                {
-                    "Etapa": "Médio Prazo (6-18 meses)",
-                    "Ação": "Setorização da rede de distribuição",
-                    "Custo Estimado": "R$ 60.000,00",
-                    "Impacto Esperado": "Redução de 20% nas perdas"
-                },
-                {
-                    "Etapa": "Longo Prazo (18-36 meses)",
-                    "Ação": "Substituição de trechos críticos da rede",
-                    "Custo Estimado": "R$ 120.000,00",
-                    "Impacto Esperado": "Redução de 25% nas perdas"
-                }
-            ]
-            
-            df_plano = pd.DataFrame(plano_acao)
-            st.dataframe(df_plano, use_container_width=True)
-            
-            # Gráfico de Gantt para cronograma
-            fig_gantt, ax_gantt = plt.subplots(figsize=(12, 5))
-            
-            # Dados para Gantt
-            etapas = ['Pesquisa de vazamentos', 'Melhoria tempo reparo', 'Instalação VRPs', 
-                    'Setorização da rede', 'Substituição trechos críticos']
-            inicio = [0, 0, 6, 8, 18]
-            duracao = [6, 3, 6, 10, 18]
-            cores = ['#3498db', '#2ecc71', '#f39c12', '#9b59b6', '#e74c3c']
-            
-            # Plotar barras
-            for i, (etapa, start, dur, cor) in enumerate(zip(etapas, inicio, duracao, cores)):
-                ax_gantt.barh(i, dur, left=start, color=cor, alpha=0.8)
-                # Adicionar texto na barra
-                ax_gantt.text(start + dur/2, i, etapa, ha='center', va='center', fontsize=9, fontweight='bold')
-            
-            # Configurações do eixo
-            ax_gantt.set_yticks([])
-            ax_gantt.set_xlabel('Meses')
-            ax_gantt.set_title('Cronograma de Implementação')
-            ax_gantt.grid(axis='x', alpha=0.3)
-            ax_gantt.set_axisbelow(True)
-            
-            # Adicionar marcadores temporais
-            for i in range(0, 37, 6):
-                ax_gantt.axvline(x=i, color='gray', linestyle='--', alpha=0.5)
-                ax_gantt.text(i, -0.5, f'{i}m', ha='center', va='top')
-            
-            st.pyplot(fig_gantt)
-            
-            # 10. Considerações Finais
-            st.subheader("10. CONSIDERAÇÕES FINAIS")
-            st.markdown("""
-            A análise detalhada do Sistema de Abastecimento de Água Potável (SAAP) do bairro Coleipa revela 
-            uma condição crítica quanto às perdas de água, com classificação D (muito ruim) segundo os critérios 
-            do Banco Mundial. Essa condição resulta em desperdício significativo de recursos hídricos e financeiros.
-            
-            A implementação das ações recomendadas neste relatório tem potencial para:
-            
-            1. **Reduzir o IVI** de {:.2f} para valores abaixo de 8 (Categoria B)
-            2. **Economizar aproximadamente R$ {:.2f} por ano** em custos operacionais
-            3. **Postergar investimentos** em ampliação do sistema de produção
-            4. **Melhorar a pressão e continuidade** do abastecimento para os usuários
-            
-            Recomenda-se fortemente a adoção imediata das medidas de curto prazo, com foco especial na pesquisa 
-            de vazamentos não visíveis, que constitui a ação de maior impacto imediato segundo a Metodologia NPR.
-            
-            **Observação importante:** O sucesso do programa de redução de perdas está diretamente ligado ao 
-            comprometimento da gestão e à alocação dos recursos necessários para sua implementação.
-            """.format(relatorio['indicadores']['ivi'], economia_potencial))
-            
-            # Assinatura e data
             st.markdown("---")
-            data_atual = datetime.now().strftime("%d/%m/%Y")
-            st.markdown(f"""
-            **Relatório gerado em:** {data_atual}
+            st.success("Relatório gerado com sucesso!")
+
+
+def mostrar_pagina_configuracoes(detector):
+    """Página de configurações do sistema"""
+    st.header("⚙️ Configurações do Sistema")
+    st.markdown("Personalize as características do sistema de abastecimento")
+    
+    # Exibir características atuais
+    st.subheader("Características Atuais do Sistema")
+    caracteristicas = detector.caracteristicas_sistema
+    
+    # Criar DataFrame para exibir as características atuais de forma organizada
+    df_caracteristicas = pd.DataFrame({
+        'Característica': list(caracteristicas.keys()),
+        'Valor Atual': list(caracteristicas.values())
+    })
+    st.dataframe(df_caracteristicas)
+    
+    # Formulário para atualizar características
+    st.subheader("Atualizar Características")
+    st.markdown("Preencha os campos abaixo para atualizar as características do sistema. Deixe em branco para manter o valor atual.")
+    
+    # Lista das principais características para atualizar
+    caracteristicas_para_atualizar = [
+        'area_territorial', 'populacao', 'numero_ligacoes', 
+        'comprimento_rede', 'densidade_ramais', 'percentual_perdas', 'ivi'
+    ]
+    
+    # Criar formulário
+    with st.form("form_caracteristicas"):
+        # Dividir em colunas
+        col1, col2 = st.columns(2)
+        
+        # Dicionário para armazenar novas características
+        novas_caracteristicas = {}
+        
+        # Primeira coluna
+        with col1:
+            for carac in caracteristicas_para_atualizar[:3]:
+                valor_atual = detector.caracteristicas_sistema[carac]
+                valor = st.number_input(
+                    f"{carac.replace('_', ' ').title()} (atual: {valor_atual})",
+                    value=None,
+                    placeholder=f"Valor atual: {valor_atual}"
+                )
+                if valor is not None:
+                    novas_caracteristicas[carac] = valor
+        
+        # Segunda coluna
+        with col2:
+            for carac in caracteristicas_para_atualizar[3:]:
+                valor_atual = detector.caracteristicas_sistema[carac]
+                valor = st.number_input(
+                    f"{carac.replace('_', ' ').title()} (atual: {valor_atual})",
+                    value=None,
+                    placeholder=f"Valor atual: {valor_atual}"
+                )
+                if valor is not None:
+                    novas_caracteristicas[carac] = valor
+        
+        # Botão para atualizar
+        botao_atualizar = st.form_submit_button("Atualizar Características")
+    
+    if botao_atualizar:
+        if novas_caracteristicas:
+            detector.atualizar_caracteristicas_sistema(novas_caracteristicas)
+            st.success("Características atualizadas com sucesso!")
             
-            **Sistema de Detecção de Vazamentos - SAAP Coleipa**  
-            *Baseado em técnicas híbridas Fuzzy-Bayes e análise de dados reais de monitoramento*
-            """)
-            
-            st.markdown("---")
-            st.success("Relatório completo gerado com sucesso!")
+            # Exibir novas características
+            st.subheader("Novas Características do Sistema")
+            df_caracteristicas_atualizadas = pd.DataFrame({
+                'Característica': list(detector.caracteristicas_sistema.keys()),
+                'Valor Atualizado': list(detector.caracteristicas_sistema.values())
+            })
+            st.dataframe(df_caracteristicas_atualizadas)
+        else:
+            st.info("Nenhuma característica foi alterada.")
+    
+    # Opções adicionais
+    st.markdown("---")
+    st.subheader("Opções Adicionais")
+    
+    # Baixar template de dados
+    st.markdown("##### Template de Dados")
+    formato = st.radio("Formato do template:", ["Excel (.xlsx)", "CSV (.csv)"], horizontal=True)
+    nome_arquivo = "template_dados_coleipa." + ("xlsx" if formato == "Excel (.xlsx)" else "csv")
+    df_template = detector.gerar_dados_template()
+    download_button(df_template, nome_arquivo, "⬇️ Download Template de Dados")
+    
+    # Redefinir para valores padrão
+    st.markdown("##### Redefinir Sistema")
+    if st.button("Redefinir para Valores Padrão"):
+        # Recriar detector com valores padrão
+        new_detector = DetectorVazamentosColeipa()
+        # Substituir o detector no cache
+        st.session_state['detector'] = new_detector
+        st.success("Sistema redefinido para valores padrão!")
+        st.experimental_rerun()
+
+
+# Iniciar aplicativo
+if __name__ == "__main__":
+    app_main()

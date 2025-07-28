@@ -13,11 +13,34 @@ import io
 import os
 import time
 import json
-import threading
-from queue import Queue
-import plotly.graph_objects as go
-import plotly.express as px
-from plotly.subplots import make_subplots
+# Função para download de arquivos
+def download_button(object_to_download, download_filename, button_text):
+    """
+    Gera um botão que permite o download de um objeto
+    """
+    if isinstance(object_to_download, pd.DataFrame):
+        # Se for um DataFrame
+        buffer = io.BytesIO()
+        
+        if download_filename.endswith('.csv'):
+            object_to_download.to_csv(buffer, index=False)
+            mime_type = "text/csv"
+        else:
+            object_to_download.to_excel(buffer, index=False)
+            mime_type = "application/vnd.ms-excel"
+        
+        buffer.seek(0)
+        st.download_button(
+            label=button_text,
+            data=buffer,
+            file_name=download_filename,
+            mime=mime_type
+        )
+    else:
+        # Se for outro tipo de objeto
+        st.warning("Tipo de objeto não suportado para download")
+
+# Removido plotly e matplotlib.dates para compatibilidade
 
 # Configurações para matplotlib
 plt.style.use('default')
@@ -332,40 +355,22 @@ def configurar_layout_responsivo():
 # ============================================================================
 
 class GerenciadorTempoReal:
-    """Gerencia dados e atualizações em tempo real"""
+    """Gerencia dados simulados para demonstração"""
     
     def __init__(self):
         self.dados_atuais = {}
-        self.fila_atualizacoes = Queue()
         self.ativo = False
-        self.thread_atualizacao = None
         
     def iniciar_monitoramento(self):
-        """Inicia o monitoramento em tempo real"""
+        """Inicia o modo de demonstração"""
         self.ativo = True
-        self.thread_atualizacao = threading.Thread(target=self._loop_atualizacao)
-        self.thread_atualizacao.daemon = True
-        self.thread_atualizacao.start()
     
     def parar_monitoramento(self):
-        """Para o monitoramento em tempo real"""
+        """Para o modo de demonstração"""
         self.ativo = False
     
-    def _loop_atualizacao(self):
-        """Loop principal de atualização"""
-        while self.ativo:
-            try:
-                # Simular recebimento de dados (em produção, viria de sensores/API)
-                novos_dados = self._simular_dados_sensor()
-                self.dados_atuais = novos_dados
-                self.fila_atualizacoes.put(novos_dados)
-                time.sleep(5)  # Atualizar a cada 5 segundos
-            except Exception as e:
-                print(f"Erro no loop de atualização: {e}")
-                time.sleep(10)
-    
     def _simular_dados_sensor(self):
-        """Simula dados de sensores (substituir por dados reais)"""
+        """Simula dados de sensores"""
         import random
         
         # Adicionar alguma variação realística
@@ -381,11 +386,11 @@ class GerenciadorTempoReal:
             pressao_base = 6 + random.normalvariate(0, 0.5)
         
         # Ocasionalmente simular uma anomalia
-        if random.random() < 0.1:  # 10% de chance
+        if random.random() < 0.15:  # 15% de chance
             vazao_base += random.uniform(3, 6)  # Aumentar vazão
             pressao_base -= random.uniform(1, 2)  # Diminuir pressão
         
-        return {
+        dados = {
             'timestamp': base_time,
             'vazao': max(7, min(vazao_base, 16)),
             'pressao': max(2, min(pressao_base, 10)),
@@ -394,9 +399,14 @@ class GerenciadorTempoReal:
             'ph': random.uniform(6.5, 8.5),
             'turbidez': random.uniform(0.1, 2.0)
         }
+        
+        self.dados_atuais = dados
+        return dados
     
     def obter_dados_atuais(self):
         """Retorna os dados mais recentes"""
+        if not self.dados_atuais:
+            return self._simular_dados_sensor()
         return self.dados_atuais
 
 # ============================================================================
@@ -488,8 +498,323 @@ class DetectorVazamentosColeipa:
         # Inicializar sistema de alertas
         self.sistema_alertas = SistemaAlertas()
     
-    # Manter todos os métodos originais aqui (carregar_dados_arquivo, criar_dataframe_coleipa, etc.)
-    # Por brevidade, não vou repetir todos os métodos, mas eles permaneceriam iguais
+    def gerar_dados_baseados_coleipa(self, n_amostras=500):
+        """Gera dados sintéticos baseados nas características do sistema Coleipa"""
+        # Simular dados baseados nos padrões observados
+        vazao_normal_mean = 10.5
+        vazao_normal_std = 2.0
+        pressao_normal_mean = 5.5
+        pressao_normal_std = 1.0
+        
+        vazao_vazamento_mean = 14.0
+        vazao_vazamento_std = 1.5
+        pressao_vazamento_mean = 3.5
+        pressao_vazamento_std = 0.8
+        
+        # Gerar dados sintéticos
+        n_normal = int(0.55 * n_amostras)  # 55% normal
+        n_vazamento = n_amostras - n_normal
+        
+        # Dados normais
+        vazao_normal = np.random.normal(vazao_normal_mean, vazao_normal_std, n_normal)
+        pressao_normal = np.random.normal(pressao_normal_mean, pressao_normal_std, n_normal)
+        ivi_normal = np.random.normal(8, 2, n_normal)
+        
+        # Dados de vazamento
+        vazao_vazamento = np.random.normal(vazao_vazamento_mean, vazao_vazamento_std, n_vazamento)
+        pressao_vazamento = np.random.normal(pressao_vazamento_mean, pressao_vazamento_std, n_vazamento)
+        ivi_vazamento = np.random.normal(16.33, 3, n_vazamento)
+        
+        # Combinar dados
+        X = np.vstack([
+            np.column_stack([vazao_normal, pressao_normal, ivi_normal]),
+            np.column_stack([vazao_vazamento, pressao_vazamento, ivi_vazamento])
+        ])
+        
+        y = np.hstack([np.zeros(n_normal), np.ones(n_vazamento)])
+        
+        return X, y, None
+    
+    def treinar_modelo_bayesiano(self, X, y):
+        """Treina modelo Bayesiano com dados baseados no Coleipa"""
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
+        
+        self.modelo_bayes = GaussianNB()
+        self.modelo_bayes.fit(X_train, y_train)
+        
+        y_pred = self.modelo_bayes.predict(X_test)
+        
+        # Calcular matriz de confusão e relatório de classificação
+        cm = confusion_matrix(y_test, y_pred)
+        report = classification_report(y_test, y_pred, target_names=['Normal', 'Vazamento'], output_dict=True)
+        
+    def criar_dataframe_coleipa(self):
+        """Cria DataFrame com os dados reais do monitoramento Coleipa"""
+        df = pd.DataFrame()
+        
+        # Calcular médias e desvios padrão
+        for hora in range(1, 25):
+            idx = hora - 1
+            vazao_valores = []
+            pressao_valores = []
+            
+            # Verificar se temos dados para esta hora
+            if idx < len(self.dados_coleipa['hora']):
+                if 'vazao_dia1' in self.dados_coleipa and idx < len(self.dados_coleipa['vazao_dia1']):
+                    vazao_valores.append(self.dados_coleipa['vazao_dia1'][idx])
+                if 'vazao_dia2' in self.dados_coleipa and idx < len(self.dados_coleipa['vazao_dia2']):
+                    vazao_valores.append(self.dados_coleipa['vazao_dia2'][idx])
+                if 'vazao_dia3' in self.dados_coleipa and idx < len(self.dados_coleipa['vazao_dia3']):
+                    vazao_valores.append(self.dados_coleipa['vazao_dia3'][idx])
+                    
+                if 'pressao_dia1' in self.dados_coleipa and idx < len(self.dados_coleipa['pressao_dia1']):
+                    pressao_valores.append(self.dados_coleipa['pressao_dia1'][idx])
+                if 'pressao_dia2' in self.dados_coleipa and idx < len(self.dados_coleipa['pressao_dia2']):
+                    pressao_valores.append(self.dados_coleipa['pressao_dia2'][idx])
+                if 'pressao_dia3' in self.dados_coleipa and idx < len(self.dados_coleipa['pressao_dia3']):
+                    pressao_valores.append(self.dados_coleipa['pressao_dia3'][idx])
+            
+            # Se não temos dados suficientes, pular esta hora
+            if len(vazao_valores) == 0 or len(pressao_valores) == 0:
+                continue
+                
+            df = pd.concat([df, pd.DataFrame({
+                'Hora': [hora],
+                'Vazao_Dia1': [vazao_valores[0] if len(vazao_valores) > 0 else None],
+                'Vazao_Dia2': [vazao_valores[1] if len(vazao_valores) > 1 else None],
+                'Vazao_Dia3': [vazao_valores[2] if len(vazao_valores) > 2 else None],
+                'Vazao_Media': [np.mean(vazao_valores)],
+                'Vazao_DP': [np.std(vazao_valores)],
+                'Pressao_Dia1': [pressao_valores[0] if len(pressao_valores) > 0 else None],
+                'Pressao_Dia2': [pressao_valores[1] if len(pressao_valores) > 1 else None],
+                'Pressao_Dia3': [pressao_valores[2] if len(pressao_valores) > 2 else None],
+                'Pressao_Media': [np.mean(pressao_valores)],
+                'Pressao_DP': [np.std(pressao_valores)],
+                'IVI': [self.caracteristicas_sistema['ivi']],
+                'Perdas_Detectadas': [1 if np.mean(vazao_valores) > 13 and np.mean(pressao_valores) < 5 else 0]
+            })], ignore_index=True)
+        
+        return df
+    
+    def visualizar_dados_coleipa(self):
+        """Visualiza os dados reais do monitoramento Coleipa"""
+        df = self.criar_dataframe_coleipa()
+        
+        fig, axes = plt.subplots(3, 1, figsize=(15, 12))
+        
+        # Gráfico 1: Vazões dos três dias
+        if not df.empty:
+            axes[0].plot(df['Hora'], df['Vazao_Dia1'], 'b-o', label='Dia 1', alpha=0.7)
+            axes[0].plot(df['Hora'], df['Vazao_Dia2'], 'r-s', label='Dia 2', alpha=0.7)
+            axes[0].plot(df['Hora'], df['Vazao_Dia3'], 'g-^', label='Dia 3', alpha=0.7)
+            axes[0].plot(df['Hora'], df['Vazao_Media'], 'k-', linewidth=3, label='Média')
+            axes[0].fill_between(df['Hora'], 
+                               df['Vazao_Media'] - df['Vazao_DP'], 
+                               df['Vazao_Media'] + df['Vazao_DP'], 
+                               alpha=0.2, color='gray', label='±1σ')
+        axes[0].set_title('Monitoramento de Vazão - SAAP Coleipa (72 horas)')
+        axes[0].set_xlabel('Hora do Dia')
+        axes[0].set_ylabel('Vazão (m³/h)')
+        axes[0].legend()
+        axes[0].grid(True, alpha=0.3)
+        
+        # Gráfico 2: Pressões dos três dias
+        if not df.empty:
+            axes[1].plot(df['Hora'], df['Pressao_Dia1'], 'b-o', label='Dia 1', alpha=0.7)
+            axes[1].plot(df['Hora'], df['Pressao_Dia2'], 'r-s', label='Dia 2', alpha=0.7)
+            axes[1].plot(df['Hora'], df['Pressao_Dia3'], 'g-^', label='Dia 3', alpha=0.7)
+            axes[1].plot(df['Hora'], df['Pressao_Media'], 'k-', linewidth=3, label='Média')
+            axes[1].fill_between(df['Hora'], 
+                               df['Pressao_Media'] - df['Pressao_DP'], 
+                               df['Pressao_Media'] + df['Pressao_DP'], 
+                               alpha=0.2, color='gray', label='±1σ')
+        axes[1].axhline(y=10, color='red', linestyle='--', label='Mínimo NBR 12218 (10 mca)')
+        axes[1].set_title('Monitoramento de Pressão - SAAP Coleipa (72 horas)')
+        axes[1].set_xlabel('Hora do Dia')
+        axes[1].set_ylabel('Pressão (mca)')
+        axes[1].legend()
+        axes[1].grid(True, alpha=0.3)
+        
+        # Gráfico 3: Comportamento inverso Vazão vs Pressão
+        if not df.empty:
+            ax2 = axes[2].twinx()
+            line1 = axes[2].plot(df['Hora'], df['Vazao_Media'], 'b-', linewidth=2, label='Vazão Média')
+            line2 = ax2.plot(df['Hora'], df['Pressao_Media'], 'r-', linewidth=2, label='Pressão Média')
+            
+            axes[2].set_xlabel('Hora do Dia')
+            axes[2].set_ylabel('Vazão (m³/h)', color='b')
+            ax2.set_ylabel('Pressão (mca)', color='r')
+            axes[2].tick_params(axis='y', labelcolor='b')
+            ax2.tick_params(axis='y', labelcolor='r')
+            
+            # Combinar legendas
+            lines = line1 + line2
+            labels = [l.get_label() for l in lines]
+            axes[2].legend(lines, labels, loc='upper left')
+        
+        axes[2].set_title('Comportamento Inverso: Vazão × Pressão (Rede Setorizada)')
+        axes[2].grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        
+        # Calcular estatísticas
+        stats = {}
+        if not df.empty:
+            stats = {
+                "vazao_min": df['Vazao_Media'].min(),
+                "vazao_min_hora": df.loc[df['Vazao_Media'].idxmin(), 'Hora'],
+                "vazao_max": df['Vazao_Media'].max(),
+                "vazao_max_hora": df.loc[df['Vazao_Media'].idxmax(), 'Hora'],
+                "pressao_min": df['Pressao_Media'].min(),
+                "pressao_min_hora": df.loc[df['Pressao_Media'].idxmin(), 'Hora'],
+                "pressao_max": df['Pressao_Media'].max(),
+                "pressao_max_hora": df.loc[df['Pressao_Media'].idxmax(), 'Hora'],
+                "vazao_ratio": df['Vazao_Media'].min()/df['Vazao_Media'].max()*100,
+                "horas_pressao_baixa": len(df[df['Pressao_Media'] < 10]),
+                "perc_pressao_baixa": len(df[df['Pressao_Media'] < 10])/24*100
+            }
+        else:
+            stats = {
+                "vazao_min": 0, "vazao_min_hora": 0, "vazao_max": 0, "vazao_max_hora": 0,
+                "pressao_min": 0, "pressao_min_hora": 0, "pressao_max": 0, "pressao_max_hora": 0,
+                "vazao_ratio": 0, "horas_pressao_baixa": 0, "perc_pressao_baixa": 0
+            }
+        
+        return fig, stats, df
+        
+    def visualizar_conjuntos_fuzzy(self):
+        """Visualiza os conjuntos fuzzy baseados nos dados do Coleipa"""
+        # Criar sistema fuzzy se ainda não existir
+        vazao, pressao, ivi, risco_vazamento = self.criar_sistema_fuzzy()
+        
+        fig, axes = plt.subplots(2, 2, figsize=(15, 12))
+        
+        # Vazão
+        axes[0, 0].clear()
+        for nome in self.param_vazao.keys():
+            axes[0, 0].plot(vazao.universe, vazao[nome].mf, label=nome, linewidth=2)
+        axes[0, 0].set_title('Conjuntos Fuzzy - Vazão (baseado nos dados Coleipa)')
+        axes[0, 0].set_xlabel('Vazão (m³/h)')
+        axes[0, 0].set_ylabel('Grau de Pertinência')
+        axes[0, 0].legend()
+        axes[0, 0].grid(True, alpha=0.3)
+        
+        # Pressão
+        axes[0, 1].clear()
+        for nome in self.param_pressao.keys():
+            axes[0, 1].plot(pressao.universe, pressao[nome].mf, label=nome, linewidth=2)
+        axes[0, 1].set_title('Conjuntos Fuzzy - Pressão (baseado nos dados Coleipa)')
+        axes[0, 1].set_xlabel('Pressão (mca)')
+        axes[0, 1].set_ylabel('Grau de Pertinência')
+        axes[0, 1].legend()
+        axes[0, 1].grid(True, alpha=0.3)
+        
+        # IVI
+        axes[1, 0].clear()
+        for nome in self.param_ivi.keys():
+            axes[1, 0].plot(ivi.universe, ivi[nome].mf, label=nome, linewidth=2)
+        axes[1, 0].set_title('Conjuntos Fuzzy - IVI (Classificação Banco Mundial)')
+        axes[1, 0].set_xlabel('IVI')
+        axes[1, 0].set_ylabel('Grau de Pertinência')
+        axes[1, 0].legend()
+        axes[1, 0].grid(True, alpha=0.3)
+        axes[1, 0].axvline(x=16.33, color='red', linestyle='--', label='Coleipa (16.33)')
+        
+        # Risco
+        axes[1, 1].clear()
+        for nome in self.param_risco.keys():
+            axes[1, 1].plot(risco_vazamento.universe, risco_vazamento[nome].mf, label=nome, linewidth=2)
+        axes[1, 1].set_title('Conjuntos Fuzzy - Risco de Vazamento')
+        axes[1, 1].set_xlabel('Risco (%)')
+        axes[1, 1].set_ylabel('Grau de Pertinência')
+        axes[1, 1].legend()
+        axes[1, 1].grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        return fig
+    
+    def analisar_caso_coleipa(self, vazao=None, pressao=None, ivi=None):
+        """Analisa um caso específico usando os padrões do Coleipa"""
+        # Usar valores típicos do Coleipa se não fornecidos
+        if vazao is None:
+            vazao = 14.5  # Vazão típica de pico
+        if pressao is None:
+            pressao = 3.5   # Pressão baixa típica
+        if ivi is None:
+            ivi = 16.33   # IVI real do Coleipa
+        
+        # Classificação baseada nos dados Coleipa
+        if vazao < 9:
+            classe_vazao = "BAIXA (noturna)"
+        elif vazao < 14:
+            classe_vazao = "NORMAL (transição)"
+        else:
+            classe_vazao = "ALTA (pico/vazamento)"
+        
+        if pressao < 5:
+            classe_pressao = "BAIXA (problema)"
+        elif pressao < 8:
+            classe_pressao = "MÉDIA (operacional)"
+        else:
+            classe_pressao = "ALTA (boa)"
+        
+        if ivi < 4:
+            classe_ivi = "BOM (Categoria A)"
+        elif ivi < 8:
+            classe_ivi = "REGULAR (Categoria B)"
+        elif ivi < 16:
+            classe_ivi = "RUIM (Categoria C)"
+        else:
+            classe_ivi = "MUITO RUIM (Categoria D)"
+        
+        # Avaliação fuzzy
+        risco_fuzzy = self.avaliar_risco_fuzzy(vazao, pressao, ivi)
+        
+        resultado = {}
+        resultado['vazao'] = vazao
+        resultado['pressao'] = pressao
+        resultado['ivi'] = ivi
+        resultado['classe_vazao'] = classe_vazao
+        resultado['classe_pressao'] = classe_pressao
+        resultado['classe_ivi'] = classe_ivi
+        resultado['risco_fuzzy'] = risco_fuzzy
+        
+        # Avaliação Bayesiana (se disponível)
+        if self.modelo_bayes is not None:
+            dados = [vazao, pressao, ivi]
+            prob_bayes = self.modelo_bayes.predict_proba([dados])[0][1]
+            prob_hibrida = 0.6 * (risco_fuzzy/100) + 0.4 * prob_bayes
+            
+            resultado['prob_bayes'] = prob_bayes
+            resultado['prob_hibrida'] = prob_hibrida
+            
+            if prob_hibrida > 0.5:
+                resultado['status'] = "VAZAMENTO DETECTADO"
+                resultado['cor'] = "🔴"
+            elif prob_hibrida > 0.3:
+                resultado['status'] = "RISCO ELEVADO - MONITORAR"
+                resultado['cor'] = "🟡"
+            else:
+                resultado['status'] = "OPERAÇÃO NORMAL"
+                resultado['cor'] = "🟢"
+        else:
+            if risco_fuzzy > 50:
+                resultado['status'] = "RISCO ELEVADO (apenas análise fuzzy)"
+                resultado['cor'] = "🟡"
+            else:
+                resultado['status'] = "RISCO BAIXO (apenas análise fuzzy)"
+                resultado['cor'] = "🟢"
+        
+        # Comparação com dados reais do Coleipa
+        resultado['percentual_perdas'] = self.caracteristicas_sistema['percentual_perdas']
+        resultado['ivi_real'] = self.caracteristicas_sistema['ivi']
+        
+        return resultado
+    
+    def gerar_dados_template(self):
+        """Gera os dados padrão para download como template"""
+        df = pd.DataFrame(self.dados_coleipa_default)
+        return df
     
     def carregar_dados_arquivo(self, arquivo_uploaded):
         """Carrega dados de monitoramento de um arquivo Excel ou CSV do Streamlit"""
@@ -603,7 +928,7 @@ class DetectorVazamentosColeipa:
 # ============================================================================
 
 def criar_dashboard_tempo_real(detector, gerenciador_tempo_real):
-    """Cria dashboard com atualização em tempo real"""
+    """Cria dashboard com simulação de tempo real"""
     
     st.markdown('<h1 class="main-header">🚰 Monitor em Tempo Real - Sistema Coleipa</h1>', unsafe_allow_html=True)
     
@@ -611,48 +936,39 @@ def criar_dashboard_tempo_real(detector, gerenciador_tempo_real):
     col_control1, col_control2, col_control3 = st.columns(3)
     
     with col_control1:
-        if st.button("▶️ Iniciar Monitoramento", key="start_monitor"):
-            gerenciador_tempo_real.iniciar_monitoramento()
-            st.success("Monitoramento iniciado!")
+        if st.button("▶️ Simular Monitoramento", key="start_monitor"):
+            st.success("Simulação iniciada!")
     
     with col_control2:
-        if st.button("⏸️ Pausar Monitoramento", key="pause_monitor"):
-            gerenciador_tempo_real.parar_monitoramento()
-            st.info("Monitoramento pausado!")
+        if st.button("🔄 Atualizar Dados", key="refresh_data"):
+            st.info("Dados atualizados!")
     
     with col_control3:
-        auto_refresh = st.checkbox("Atualização Automática", value=True)
+        auto_refresh = st.checkbox("Modo Demonstração", value=False)
     
-    # Containers para atualização
-    container_status = st.container()
-    container_metricas = st.container()
-    container_alertas = st.container()
-    container_graficos = st.container()
+    # Simular dados atuais
+    dados_atuais = gerenciador_tempo_real._simular_dados_sensor()
+    resultado = detector.analisar_caso_tempo_real(dados_atuais)
     
-    # Loop de atualização se ativo
-    if auto_refresh and gerenciador_tempo_real.ativo:
-        dados_atuais = gerenciador_tempo_real.obter_dados_atuais()
-        
-        if dados_atuais:
-            # Analisar dados atuais
-            resultado = detector.analisar_caso_tempo_real(dados_atuais)
-            
-            # Status geral
-            with container_status:
-                exibir_status_sistema(resultado)
-            
-            # Métricas principais
-            with container_metricas:
-                exibir_metricas_tempo_real(dados_atuais, resultado)
-            
-            # Alertas
-            with container_alertas:
-                st.subheader("🚨 Alertas Ativos")
-                detector.sistema_alertas.exibir_alertas_streamlit(st)
-            
-            # Gráficos em tempo real
-            with container_graficos:
-                exibir_graficos_tempo_real(dados_atuais, resultado)
+    # Status geral
+    exibir_status_sistema(resultado)
+    
+    # Métricas principais
+    exibir_metricas_tempo_real(dados_atuais, resultado)
+    
+    # Alertas
+    st.subheader("🚨 Sistema de Alertas")
+    alerta = resultado['alerta']
+    
+    if alerta['nivel'] in ['alto', 'critico']:
+        st.error(f"{alerta['icone']} {alerta['titulo']} - Risco: {resultado['risco']:.1f}%")
+    elif alerta['nivel'] == 'medio':
+        st.warning(f"{alerta['icone']} {alerta['titulo']} - Risco: {resultado['risco']:.1f}%")
+    else:
+        st.success(f"{alerta['icone']} {alerta['titulo']} - Risco: {resultado['risco']:.1f}%")
+    
+    # Gráficos em tempo real
+    exibir_graficos_tempo_real(dados_atuais, resultado)
 
 def exibir_status_sistema(resultado):
     """Exibe status geral do sistema"""
@@ -718,66 +1034,59 @@ def exibir_metricas_tempo_real(dados, resultado):
         """, unsafe_allow_html=True)
 
 def exibir_graficos_tempo_real(dados, resultado):
-    """Exibe gráficos em tempo real usando Plotly"""
+    """Exibe gráficos em tempo real usando Matplotlib"""
     st.subheader("📈 Gráficos em Tempo Real")
     
     # Simular histórico de dados (em produção, viria do banco de dados)
     historico = gerar_historico_simulado(24)  # Últimas 24 horas
     
-    # Gráfico de vazão e pressão
-    fig = make_subplots(
-        rows=2, cols=2,
-        subplot_titles=('Vazão vs Tempo', 'Pressão vs Tempo', 'Risco vs Tempo', 'Correlação Vazão-Pressão'),
-        specs=[[{"secondary_y": True}, {"secondary_y": True}],
-               [{"secondary_y": False}, {"secondary_y": False}]]
-    )
+    # Criar gráficos com matplotlib - versão simplificada
+    fig, axes = plt.subplots(2, 2, figsize=(15, 10))
     
-    # Vazão
-    fig.add_trace(
-        go.Scatter(x=historico['tempo'], y=historico['vazao'], 
-                  name="Vazão", line=dict(color='blue')),
-        row=1, col=1
-    )
+    # Converter tempos para números simples para evitar problemas de formatação
+    horas = list(range(len(historico['tempo'])))
     
-    # Pressão
-    fig.add_trace(
-        go.Scatter(x=historico['tempo'], y=historico['pressao'], 
-                  name="Pressão", line=dict(color='orange')),
-        row=1, col=2
-    )
+    # Gráfico 1: Vazão vs Tempo
+    axes[0, 0].plot(horas, historico['vazao'], 'b-', linewidth=2, label='Vazão')
+    axes[0, 0].set_title('Vazão vs Tempo')
+    axes[0, 0].set_xlabel('Horas atrás')
+    axes[0, 0].set_ylabel('Vazão (m³/h)')
+    axes[0, 0].grid(True, alpha=0.3)
+    axes[0, 0].legend()
     
-    # Risco
-    fig.add_trace(
-        go.Scatter(x=historico['tempo'], y=historico['risco'], 
-                  name="Risco", line=dict(color='red')),
-        row=2, col=1
-    )
+    # Gráfico 2: Pressão vs Tempo
+    axes[0, 1].plot(horas, historico['pressao'], 'orange', linewidth=2, label='Pressão')
+    axes[0, 1].set_title('Pressão vs Tempo')
+    axes[0, 1].set_xlabel('Horas atrás')
+    axes[0, 1].set_ylabel('Pressão (mca)')
+    axes[0, 1].grid(True, alpha=0.3)
+    axes[0, 1].legend()
     
-    # Correlação
-    fig.add_trace(
-        go.Scatter(x=historico['vazao'], y=historico['pressao'], 
-                  mode='markers', name="Vazão vs Pressão"),
-        row=2, col=2
-    )
+    # Gráfico 3: Risco vs Tempo
+    axes[1, 0].plot(horas, historico['risco'], 'red', linewidth=2, label='Risco')
+    axes[1, 0].axhline(y=50, color='gray', linestyle='--', alpha=0.7, label='Limite')
+    axes[1, 0].set_title('Risco vs Tempo')
+    axes[1, 0].set_xlabel('Horas atrás')
+    axes[1, 0].set_ylabel('Risco (%)')
+    axes[1, 0].grid(True, alpha=0.3)
+    axes[1, 0].legend()
     
-    fig.update_layout(height=600, showlegend=False)
-    fig.update_xaxes(title_text="Tempo", row=1, col=1)
-    fig.update_xaxes(title_text="Tempo", row=1, col=2)
-    fig.update_xaxes(title_text="Tempo", row=2, col=1)
-    fig.update_xaxes(title_text="Vazão (m³/h)", row=2, col=2)
-    fig.update_yaxes(title_text="Vazão (m³/h)", row=1, col=1)
-    fig.update_yaxes(title_text="Pressão (mca)", row=1, col=2)
-    fig.update_yaxes(title_text="Risco (%)", row=2, col=1)
-    fig.update_yaxes(title_text="Pressão (mca)", row=2, col=2)
+    # Gráfico 4: Correlação Vazão-Pressão
+    scatter = axes[1, 1].scatter(historico['vazao'], historico['pressao'], 
+                                alpha=0.6, c=historico['risco'], 
+                                cmap='RdYlBu_r', s=50)
+    axes[1, 1].set_title('Correlação Vazão-Pressão')
+    axes[1, 1].set_xlabel('Vazão (m³/h)')
+    axes[1, 1].set_ylabel('Pressão (mca)')
+    axes[1, 1].grid(True, alpha=0.3)
     
-    st.plotly_chart(fig, use_container_width=True)
+    plt.tight_layout()
+    st.pyplot(fig)
 
 def gerar_historico_simulado(horas):
     """Gera histórico simulado para os gráficos"""
     import random
-    from datetime import datetime, timedelta
     
-    agora = datetime.now()
     dados = {
         'tempo': [],
         'vazao': [],
@@ -786,11 +1095,13 @@ def gerar_historico_simulado(horas):
     }
     
     for i in range(horas):
-        tempo = agora - timedelta(hours=horas-i)
-        hour = tempo.hour
+        # Usar apenas o índice da hora para simplificar
+        dados['tempo'].append(f"H-{horas-i}")
         
-        # Padrão diário
-        if 6 <= hour <= 22:
+        # Padrão diário simulado
+        hour_of_day = (datetime.now().hour - (horas-i)) % 24
+        
+        if 6 <= hour_of_day <= 22:
             vazao = 12 + random.normalvariate(0, 2)
             pressao = 4 + random.normalvariate(0, 1)
         else:
@@ -805,7 +1116,6 @@ def gerar_historico_simulado(horas):
         else:
             risco = random.uniform(10, 30)
         
-        dados['tempo'].append(tempo)
         dados['vazao'].append(max(7, min(vazao, 16)))
         dados['pressao'].append(max(2, min(pressao, 10)))
         dados['risco'].append(risco)
@@ -879,32 +1189,32 @@ def app_main():
         detector = DetectorVazamentosColeipa(arquivo_uploaded)
         st.session_state.detector = detector
     
-    # Status do sistema na sidebar
+    # Status do sistema na sidebar (simplificado)
     st.sidebar.markdown("---")
     st.sidebar.subheader("📡 Status do Sistema")
     
-    if gerenciador_tempo_real.ativo:
-        st.sidebar.success("🟢 Monitoramento Ativo")
-        dados_atuais = gerenciador_tempo_real.obter_dados_atuais()
-        if dados_atuais:
-            st.sidebar.metric("Última Vazão", f"{dados_atuais['vazao']:.1f} m³/h")
-            st.sidebar.metric("Última Pressão", f"{dados_atuais['pressao']:.1f} mca")
+    if st.sidebar.button("🔄 Obter Status Atual"):
+        dados_simulados = gerenciador_tempo_real._simular_dados_sensor()
+        st.sidebar.success("✅ Sistema Operacional")
+        st.sidebar.metric("Vazão Atual", f"{dados_simulados['vazao']:.1f} m³/h")
+        st.sidebar.metric("Pressão Atual", f"{dados_simulados['pressao']:.1f} mca")
     else:
-        st.sidebar.info("⏸️ Monitoramento Pausado")
+        st.sidebar.info("⏸️ Clique para verificar status")
     
-    # Alertas recentes na sidebar
-    alertas_recentes = detector.sistema_alertas.obter_alertas_ativos(1)  # Última hora
-    if alertas_recentes:
-        st.sidebar.markdown("---")
-        st.sidebar.subheader("🚨 Alertas Recentes")
-        for alerta in alertas_recentes[-3:]:  # Últimos 3
-            cor = alerta['cor']
-            st.sidebar.markdown(f"""
-            <div style="background-color: {cor}20; padding: 0.5rem; margin: 0.25rem 0; border-radius: 5px; border-left: 3px solid {cor};">
-                {alerta['icone']} {alerta['titulo']}<br>
-                <small>{alerta['timestamp'].strftime('%H:%M')}</small>
-            </div>
-            """, unsafe_allow_html=True)
+    # Informações do sistema na sidebar
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("ℹ️ Sistema Coleipa")
+    st.sidebar.info(
+        "Sistema baseado nos dados reais do SAAP do bairro da Coleipa, "
+        "Santa Bárbara do Pará - PA. Utiliza lógica fuzzy e modelos bayesianos "
+        "para detecção de vazamentos."
+    )
+    
+    # Características principais
+    st.sidebar.markdown("**Características:**")
+    st.sidebar.markdown(f"- População: {detector.caracteristicas_sistema['populacao']} hab")
+    st.sidebar.markdown(f"- IVI: {detector.caracteristicas_sistema['ivi']:.2f}")
+    st.sidebar.markdown(f"- Perdas: {detector.caracteristicas_sistema['percentual_perdas']:.1f}%")
     
     # Roteamento de páginas
     pagina_codigo = paginas[pagina_selecionada]

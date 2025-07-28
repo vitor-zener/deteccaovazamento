@@ -190,7 +190,610 @@ class SistemaAlertas:
             **Risco**: {alerta['risco']:.1f}%
             """)
 
-# ============================================================================
+def mostrar_pagina_bayes(detector):
+    """Página do modelo Bayesiano"""
+    st.header("🔄 Modelo Bayesiano")
+    st.markdown("Treinamento e avaliação do modelo Naive Bayes para detecção de vazamentos")
+    
+    # Parâmetros de treinamento
+    st.subheader("Parâmetros de Treinamento")
+    n_amostras = st.slider("Número de amostras sintéticas", 100, 2000, 500, 100)
+    
+    # Botão para treinar o modelo
+    if st.button("Treinar Modelo Bayesiano"):
+        with st.spinner("Gerando dados sintéticos e treinando modelo..."):
+            X, y, _ = detector.gerar_dados_baseados_coleipa(n_amostras)
+            modelo, cm, report = detector.treinar_modelo_bayesiano(X, y)
+            
+            # Exibir resultados
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.subheader("Matriz de Confusão")
+                fig_cm = visualizar_matriz_confusao(cm)
+                st.pyplot(fig_cm)
+            
+            with col2:
+                st.subheader("Relatório de Classificação")
+                # Converter relatório para DataFrame para melhor visualização
+                df_report = pd.DataFrame(report).transpose()
+                df_report = df_report.round(3)
+                st.dataframe(df_report)
+                
+                # Características do sistema
+                st.markdown("#### Características do Sistema Coleipa")
+                st.markdown(f"""
+                - **População**: {detector.caracteristicas_sistema['populacao']} habitantes
+                - **Área**: {detector.caracteristicas_sistema['area_territorial']/1000:.1f} km²
+                - **Perdas reais**: {detector.caracteristicas_sistema['percentual_perdas']:.1f}%
+                - **IVI**: {detector.caracteristicas_sistema['ivi']:.2f} (Categoria D - Muito Ruim)
+                """)
+    
+    # Explicação do modelo
+    st.markdown("---")
+    st.subheader("Sobre o Modelo Bayesiano")
+    st.markdown("""
+    O modelo Naive Bayes é treinado com dados sintéticos gerados a partir dos padrões observados no Sistema Coleipa.
+    Ele considera três parâmetros principais:
+    
+    1. **Vazão** - Valores altos indicam possíveis vazamentos
+    2. **Pressão** - Valores baixos indicam possíveis vazamentos
+    3. **IVI** - Sistemas com IVI alto têm maior probabilidade de vazamentos
+    
+    Os dados de treinamento são gerados com base nas seguintes características:
+    
+    - **Operação Normal**: 
+      - Vazão média mais baixa
+      - Pressão média mais alta
+      - IVI médio mais baixo (simulando sistemas mais eficientes)
+      
+    - **Vazamento**: 
+      - Vazão média mais alta
+      - Pressão média mais baixa
+      - IVI médio próximo ao do Coleipa (16.33)
+    
+    O classificador é então treinado para reconhecer esses padrões e identificar situações de vazamento em dados novos.
+    """)
+
+def visualizar_matriz_confusao(cm):
+    """Visualiza matriz de confusão"""
+    plt.figure(figsize=(8, 6))
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', cbar=True,
+                xticklabels=['Normal', 'Vazamento'],
+                yticklabels=['Normal', 'Vazamento'])
+    plt.title('Matriz de Confusão - Sistema Coleipa')
+    plt.xlabel('Predito')
+    plt.ylabel('Real')
+    plt.tight_layout()
+    return plt.gcf()
+
+def mostrar_pagina_mapa_calor(detector):
+    """Página dos mapas de calor IVI"""
+    st.header("🔥 Mapas de Calor IVI")
+    st.markdown("Análise de risco para diferentes combinações de vazão e pressão, considerando diferentes valores de IVI")
+    
+    # Configuração do mapa de calor
+    st.subheader("Configuração")
+    resolucao = st.slider("Resolução do mapa", 10, 50, 30, 5, 
+                         help="Valores maiores geram mapas mais detalhados, mas aumentam o tempo de processamento")
+    
+    # Botão para gerar mapas de calor
+    if st.button("Gerar Mapas de Calor"):
+        with st.spinner("Gerando mapas de calor IVI... Isso pode demorar alguns segundos."):
+            fig, ivi_valores = gerar_mapa_calor_ivi(detector, resolucao)
+            st.pyplot(fig)
+    
+    # Análise detalhada do IVI
+    st.markdown("---")
+    st.subheader("Análise Detalhada do IVI - Sistema Coleipa")
+    
+    st.markdown(f"""
+    ##### 🔍 IVI Calculado: {detector.caracteristicas_sistema['ivi']:.2f}
+    ##### 📊 Classificação: Categoria D (Muito Ruim)
+    ##### ⚠️ Interpretação: IVI > 16 indica uso extremamente ineficiente de recursos
+    """)
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("##### 📈 Comparação com outras categorias:")
+        st.markdown("""
+        - 🟢 **Categoria A (IVI 1-4)**: Sistema eficiente, perdas próximas ao inevitável
+        - 🟡 **Categoria B (IVI 4-8)**: Sistema regular, melhorias recomendadas
+        - 🟠 **Categoria C (IVI 8-16)**: Sistema ruim, ações urgentes necessárias
+        - 🔴 **Categoria D (IVI >16)**: Sistema muito ruim, intervenção imediata
+        """)
+    
+    with col2:
+        st.markdown("##### 🎯 Análise específica do Coleipa (IVI = 16.33):")
+        st.markdown("""
+        - As perdas reais são 16.33 vezes maiores que as inevitáveis
+        - Potencial de redução de perdas > 400 L/ramal.dia
+        - Localização no mapa: zona vermelha (alto risco)
+        - Combinação crítica: Vazão ALTA + Pressão BAIXA
+        - Prioridade máxima: pesquisa e reparo imediato de vazamentos
+        """)
+
+def gerar_mapa_calor_ivi(detector, resolucao=30):
+    """
+    Gera mapas de calor mostrando o risco de vazamento para diferentes
+    combinações de vazão e pressão, com diferentes valores de IVI
+    """
+    # Verificar se o sistema fuzzy está criado
+    if detector.sistema_fuzzy is None:
+        detector.criar_sistema_fuzzy()
+    
+    # Valores de IVI baseados na classificação do Banco Mundial
+    ivi_valores = [2, 6, 12, 18]  # Representativos das categorias A, B, C, D
+    ivi_categorias = ['BOM (2.0)', 'REGULAR (6.0)', 'RUIM (12.0)', 'MUITO RUIM (18.0)']
+    ivi_classificacoes = ['Categoria A', 'Categoria B', 'Categoria C', 'Categoria D']
+    
+    # Valores para o mapa de calor baseados nos dados Coleipa
+    vazoes = np.linspace(7, 16, resolucao)
+    pressoes = np.linspace(2.5, 8, resolucao)
+    
+    # Configurar figura com subplots 2x2
+    fig, axes = plt.subplots(2, 2, figsize=(18, 14))
+    axes = axes.flatten()  # Facilitar o acesso aos subplots
+    
+    # Gerar um mapa de calor para cada valor de IVI
+    for idx, (ax, ivi_valor, categoria, classificacao) in enumerate(zip(axes, ivi_valores, ivi_categorias, ivi_classificacoes)):
+        
+        # Criar grade para o mapa
+        X, Y = np.meshgrid(vazoes, pressoes)
+        Z = np.zeros_like(X)
+        
+        # Calcular risco para cada ponto na grade
+        for ii in range(X.shape[0]):
+            for jj in range(X.shape[1]):
+                try:
+                    # Garantir que os valores estão dentro dos limites
+                    vazao_val = max(7, min(X[ii, jj], 16))
+                    pressao_val = max(2.5, min(Y[ii, jj], 8))
+                    ivi_val = max(1, min(ivi_valor, 25))
+                    
+                    # Calcular risco usando o sistema fuzzy
+                    detector.sistema_fuzzy.input['vazao'] = vazao_val
+                    detector.sistema_fuzzy.input['pressao'] = pressao_val
+                    detector.sistema_fuzzy.input['ivi'] = ivi_val
+                    
+                    detector.sistema_fuzzy.compute()
+                    risco = detector.sistema_fuzzy.output['risco_vazamento']
+                    Z[ii, jj] = max(0, min(risco, 100))
+                    
+                except Exception as e:
+                    # Heurística baseada nos padrões do Coleipa
+                    vazao_norm = (X[ii, jj] - 7) / (16 - 7)  # Normalizar 0-1
+                    pressao_norm = 1 - (Y[ii, jj] - 2.5) / (8 - 2.5)  # Inverter
+                    
+                    # Calcular risco base
+                    risco_base = (vazao_norm * 0.6 + pressao_norm * 0.4) * 70
+                    
+                    # Ajustar pelo IVI
+                    fator_ivi = ivi_valor / 10
+                    Z[ii, jj] = min(100, risco_base * fator_ivi + 10)
+        
+        # Plotar mapa de calor
+        im = ax.imshow(Z, cmap='RdYlGn_r', origin='lower', 
+                      extent=[vazoes.min(), vazoes.max(), pressoes.min(), pressoes.max()],
+                      aspect='auto', vmin=0, vmax=100, interpolation='bilinear')
+        
+        # Marcar o ponto característico do Coleipa
+        if idx == 3:  # Último gráfico (IVI Muito Ruim) - destaque especial
+            ax.scatter([14.5], [3.5], color='red', s=300, marker='*', 
+                      edgecolors='darkred', linewidth=3, label='Ponto Coleipa', zorder=10)
+            ax.legend(loc='upper left', fontsize=9)
+        else:
+            ax.scatter([14.5], [3.5], color='red', s=150, marker='*', 
+                      edgecolors='darkred', linewidth=2, alpha=0.7, zorder=8)
+        
+        # Configurações dos eixos
+        ax.set_xlabel('Vazão (m³/h)', fontsize=12, fontweight='bold')
+        ax.set_ylabel('Pressão (mca)', fontsize=12, fontweight='bold')
+        ax.set_title(f'Mapa de Risco - IVI {categoria}\n{classificacao}', 
+                    fontsize=12, fontweight='bold')
+        ax.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
+        ax.set_xlim(7, 16)
+        ax.set_ylim(2.5, 8)
+    
+    # Criar barra de cores
+    fig.colorbar(im, ax=axes, orientation='horizontal', pad=0.1, shrink=0.8, 
+                label='Risco de Vazamento (%)')
+    
+    plt.tight_layout()
+    return fig, ivi_valores
+
+def mostrar_pagina_simulacao(detector):
+    """Página de simulação temporal"""
+    st.header("⏱️ Simulação Temporal")
+    st.markdown("Simulação de série temporal com detecção de vazamentos")
+    
+    # Verificar se o modelo Bayes está treinado
+    if detector.modelo_bayes is None:
+        st.warning("O modelo Bayesiano não está treinado. Treinando modelo com parâmetros padrão...")
+        with st.spinner("Treinando modelo..."):
+            X, y, _ = detector.gerar_dados_baseados_coleipa()
+            detector.treinar_modelo_bayesiano(X, y)
+    
+    # Botão para executar simulação
+    if st.button("Executar Simulação"):
+        with st.spinner("Simulando série temporal... Isso pode demorar alguns segundos."):
+            fig, df = simular_serie_temporal_coleipa(detector)
+            st.pyplot(fig)
+            
+            # Mostrar dados da simulação
+            with st.expander("Ver dados da simulação"):
+                # Formatar coluna de tempo para exibição
+                df_display = df.copy()
+                if 'Tempo' in df_display.columns:
+                    df_display['Tempo'] = df_display['Tempo'].dt.strftime('%d/%m %H:%M')
+                
+                st.dataframe(df_display)
+    
+    # Explicação da simulação
+    st.markdown("---")
+    st.subheader("Sobre a Simulação Temporal")
+    st.markdown("""
+    A simulação temporal representa o comportamento do sistema ao longo de 3 dias completos, com um vazamento 
+    simulado iniciando no segundo dia às 14h. Características da simulação:
+    
+    #### Comportamento Normal
+    - Vazão e pressão seguem os padrões observados no sistema Coleipa
+    - Variações aleatórias pequenas são adicionadas para simular flutuações naturais
+    - Comportamento cíclico diário com picos de consumo durante o dia e vales durante a noite
+    
+    #### Vazamento Simulado
+    - Inicia no segundo dia às 14h
+    - Progressão gradual ao longo de várias horas (simulando vazamento crescente)
+    - Causa aumento na vazão e redução na pressão simultaneamente
+    
+    #### Sistema de Detecção
+    - Componente Fuzzy: Avalia o risco com base nas regras definidas
+    - Componente Bayes: Calcula a probabilidade com base nos dados aprendidos
+    - Sistema Híbrido: Combina ambas as abordagens (60% fuzzy + 40% bayes)
+    - Limiar de detecção: Probabilidade > 0.5 indica vazamento
+    """)
+
+def simular_serie_temporal_coleipa(detector):
+    """Simula série temporal baseada nos padrões reais do Coleipa"""
+    # Criar série temporal expandida (3 dias completos)
+    tempo = []
+    vazao = []
+    pressao = []
+    
+    for dia in range(3):
+        for hora in range(24):
+            timestamp = datetime(2024, 1, 1 + dia, hora, 0)
+            tempo.append(timestamp)
+            
+            # Usar padrão simulado baseado no Coleipa
+            if hora in range(6, 22):  # Período diurno
+                v = 12 + np.random.normal(0, 2)
+                p = 4 + np.random.normal(0, 1)
+            else:  # Período noturno
+                v = 8 + np.random.normal(0, 1)
+                p = 6 + np.random.normal(0, 0.5)
+            
+            vazao.append(max(7, min(v, 16)))
+            pressao.append(max(2, min(p, 10)))
+    
+    # Simular vazamento começando no segundo dia às 14h
+    inicio_vazamento = 24 + 14  # índice correspondente
+    for i in range(inicio_vazamento, len(vazao)):
+        # Progressão do vazamento
+        progresso = min(1.0, (i - inicio_vazamento) / 10)
+        vazao[i] += 3 * progresso  # Aumento gradual
+        pressao[i] -= 1.5 * progresso  # Diminuição gradual
+    
+    # Criar DataFrame
+    df = pd.DataFrame({
+        'Tempo': tempo,
+        'Vazao': vazao,
+        'Pressao': pressao,
+        'IVI': [detector.caracteristicas_sistema['ivi']] * len(tempo),
+        'Vazamento_Real': [0] * inicio_vazamento + [1] * (len(tempo) - inicio_vazamento)
+    })
+    
+    # Calcular detecções se o modelo estiver treinado
+    if detector.modelo_bayes is not None:
+        deteccoes = []
+        for _, row in df.iterrows():
+            risco_fuzzy = detector.avaliar_risco_fuzzy(row['Vazao'], row['Pressao'], row['IVI'])
+            prob_bayes = detector.modelo_bayes.predict_proba([[row['Vazao'], row['Pressao'], row['IVI']]])[0][1]
+            prob_hibrida = 0.6 * (risco_fuzzy/100) + 0.4 * prob_bayes
+            deteccoes.append({
+                'Risco_Fuzzy': risco_fuzzy/100,
+                'Prob_Bayes': prob_bayes,
+                'Prob_Hibrida': prob_hibrida
+            })
+        
+        for col in deteccoes[0].keys():
+            df[col] = [d[col] for d in deteccoes]
+    
+    return visualizar_serie_temporal_coleipa(df, inicio_vazamento)
+
+def visualizar_serie_temporal_coleipa(df, inicio_vazamento):
+    """Visualiza série temporal baseada no Coleipa"""
+    fig, axes = plt.subplots(3, 1, figsize=(15, 12))
+    
+    # Gráfico 1: Vazão
+    axes[0].plot(range(len(df)), df['Vazao'], 'b-', linewidth=1.5, label='Vazão')
+    axes[0].axvline(x=inicio_vazamento, color='red', linestyle='--', 
+                   label=f'Início Vazamento (Hora {inicio_vazamento})')
+    axes[0].set_ylabel('Vazão (m³/h)')
+    axes[0].set_title('Série Temporal - Sistema Coleipa: Vazão')
+    axes[0].legend()
+    axes[0].grid(True, alpha=0.3)
+    
+    # Gráfico 2: Pressão
+    axes[1].plot(range(len(df)), df['Pressao'], 'r-', linewidth=1.5, label='Pressão')
+    axes[1].axhline(y=10, color='orange', linestyle=':', label='Mínimo NBR (10 mca)')
+    axes[1].axvline(x=inicio_vazamento, color='red', linestyle='--')
+    axes[1].set_ylabel('Pressão (mca)')
+    axes[1].set_title('Série Temporal - Sistema Coleipa: Pressão')
+    axes[1].legend()
+    axes[1].grid(True, alpha=0.3)
+    
+    # Gráfico 3: Detecções (se disponível)
+    if 'Prob_Hibrida' in df.columns:
+        axes[2].plot(range(len(df)), df['Prob_Hibrida'], 'purple', linewidth=2, label='Detecção Híbrida')
+        axes[2].plot(range(len(df)), df['Risco_Fuzzy'], 'green', alpha=0.7, label='Componente Fuzzy')
+        axes[2].plot(range(len(df)), df['Prob_Bayes'], 'orange', alpha=0.7, label='Componente Bayes')
+        axes[2].axhline(y=0.5, color='black', linestyle='-.', label='Limiar Detecção')
+        axes[2].axvline(x=inicio_vazamento, color='red', linestyle='--')
+        axes[2].set_ylabel('Probabilidade')
+        axes[2].set_title('Detecção de Vazamentos - Sistema Híbrido')
+        axes[2].legend()
+        axes[2].grid(True, alpha=0.3)
+    else:
+        axes[2].text(0.5, 0.5, 'Modelo Bayesiano não treinado\nApenas análise fuzzy disponível', 
+                    ha='center', va='center', transform=axes[2].transAxes, fontsize=14)
+        axes[2].set_title('Detecção não disponível')
+    
+    axes[2].set_xlabel('Tempo (horas)')
+    plt.tight_layout()
+    return fig, df
+
+def mostrar_pagina_relatorio(detector):
+    """Página de relatório completo"""
+    st.header("📝 Relatório Completo")
+    st.markdown("Relatório detalhado baseado nos dados do sistema Coleipa")
+    
+    # Botão para gerar relatório
+    if st.button("Gerar Relatório Completo"):
+        with st.spinner("Gerando relatório..."):
+            relatorio = gerar_relatorio_coleipa(detector)
+            
+            # Cabeçalho do relatório
+            st.markdown("---")
+            st.subheader("RELATÓRIO DE ANÁLISE - SISTEMA COLEIPA")
+            st.markdown("---")
+            
+            # 1. Características do Sistema
+            st.subheader("1. CARACTERÍSTICAS DO SISTEMA")
+            st.markdown(f"""
+            - **Localização**: {relatorio['caracteristicas']['localizacao']}
+            - **Área territorial**: {relatorio['caracteristicas']['area']:.1f} km²
+            - **População atendida**: {relatorio['caracteristicas']['populacao']} habitantes
+            - **Número de ligações**: {relatorio['caracteristicas']['ligacoes']}
+            - **Extensão da rede**: {relatorio['caracteristicas']['rede']} km
+            - **Densidade de ramais**: {relatorio['caracteristicas']['densidade_ramais']} ramais/km
+            """)
+            
+            # 2. Resultados do Monitoramento
+            st.subheader("2. RESULTADOS DO MONITORAMENTO (72 horas)")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.metric("Volume médio demandado", f"{relatorio['monitoramento']['volume_demandado']:.1f} m³/dia")
+                st.metric("Volume médio consumido", f"{relatorio['monitoramento']['volume_consumido']:.1f} m³/dia")
+            
+            with col2:
+                st.metric("Perdas reais médias", f"{relatorio['monitoramento']['perdas_reais']:.1f} m³/dia")
+                st.metric("Percentual de perdas", f"{relatorio['monitoramento']['percentual_perdas']:.1f}%")
+            
+            # 3. Indicadores de Desempenho
+            st.subheader("3. INDICADORES DE DESEMPENHO")
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.metric("IPRL", f"{relatorio['indicadores']['iprl']} m³/lig.dia", "Perdas Reais por Ligação")
+            
+            with col2:
+                st.metric("IPRI", f"{relatorio['indicadores']['ipri']} m³/lig.dia", "Perdas Reais Inevitáveis")
+            
+            with col3:
+                st.metric("IVI", f"{relatorio['indicadores']['ivi']}", "Índice de Vazamentos na Infraestrutura")
+            
+            # 4. Classificação
+            st.subheader("4. CLASSIFICAÇÃO (Banco Mundial)")
+            st.markdown(f"""
+            - **Categoria**: {relatorio['classificacao']['categoria']}
+            - **Interpretação**: {relatorio['classificacao']['interpretacao']}
+            - **Recomendação**: {relatorio['classificacao']['recomendacao']}
+            """)
+            
+            # 5. Metodologia NPR - Priorização de Ações
+            st.subheader("5. METODOLOGIA NPR - PRIORIZAÇÃO DE AÇÕES")
+            
+            # Criar tabela de prioridades
+            df_prioridades = pd.DataFrame(relatorio['prioridades'])
+            df_prioridades.columns = ["Ordem", "Ação", "Resultado"]
+            
+            # Gráfico de barras para prioridades
+            fig, ax = plt.subplots(figsize=(10, 5))
+            bars = ax.barh(
+                [p['acao'] for p in relatorio['prioridades']], 
+                [p['resultado'] for p in relatorio['prioridades']],
+                color=['#3498db', '#2980b9', '#1f618d', '#154360']
+            )
+            ax.set_xlabel('Resultado NPR')
+            ax.set_title('Priorização de Ações (Metodologia NPR)')
+            
+            # Adicionar valores nas barras
+            for bar in bars:
+                width = bar.get_width()
+                label_x_pos = width + 1
+                ax.text(label_x_pos, bar.get_y() + bar.get_height()/2, f'{width}', 
+                       va='center', fontweight='bold')
+            
+            st.pyplot(fig)
+            st.dataframe(df_prioridades)
+            
+            # 6. Problemas Identificados
+            st.subheader("6. PROBLEMAS IDENTIFICADOS")
+            for i, problema in enumerate(relatorio['problemas'], 1):
+                st.markdown(f"- {problema}")
+            
+            # 7. Recomendações
+            st.subheader("7. RECOMENDAÇÕES")
+            for i, recomendacao in enumerate(relatorio['recomendacoes'], 1):
+                st.markdown(f"- **Recomendação {i}**: {recomendacao}")
+            
+            st.markdown("---")
+            st.success("Relatório gerado com sucesso!")
+
+def gerar_relatorio_coleipa(detector):
+    """Gera relatório completo baseado nos dados do Coleipa"""
+    relatorio = {
+        "caracteristicas": {
+            "localizacao": "Bairro Coleipa, Santa Bárbara do Pará-PA",
+            "area": detector.caracteristicas_sistema['area_territorial']/1000,
+            "populacao": detector.caracteristicas_sistema['populacao'],
+            "ligacoes": detector.caracteristicas_sistema['numero_ligacoes'],
+            "rede": detector.caracteristicas_sistema['comprimento_rede'],
+            "densidade_ramais": detector.caracteristicas_sistema['densidade_ramais']
+        },
+        "monitoramento": {
+            "volume_demandado": 273.5,
+            "volume_consumido": detector.caracteristicas_sistema['volume_consumido_medio'],
+            "perdas_reais": detector.caracteristicas_sistema['perdas_reais_media'],
+            "percentual_perdas": detector.caracteristicas_sistema['percentual_perdas']
+        },
+        "indicadores": {
+            "iprl": detector.caracteristicas_sistema['iprl'],
+            "ipri": detector.caracteristicas_sistema['ipri'],
+            "ivi": detector.caracteristicas_sistema['ivi']
+        },
+        "classificacao": {
+            "categoria": "D (Muito Ruim)",
+            "interpretacao": "Uso ineficiente de recursos",
+            "recomendacao": "Programas de redução de perdas são imperiosos e prioritários"
+        },
+        "prioridades": [
+            {"ordem": 1, "acao": "Pesquisa de vazamentos", "resultado": 40},
+            {"ordem": 2, "acao": "Agilidade e qualidade dos reparos", "resultado": 32},
+            {"ordem": 3, "acao": "Gerenciamento de infraestrutura", "resultado": 28},
+            {"ordem": 4, "acao": "Gerenciamento de pressão", "resultado": 2}
+        ],
+        "problemas": [
+            "Pressões abaixo do mínimo NBR 12218 (10 mca)",
+            "Vazões mínimas noturnas elevadas (>50% da máxima)",
+            "Comportamento inverso vazão-pressão característico de vazamentos",
+            "IVI classificado como 'Muito Ruim' (>16)"
+        ],
+        "recomendacoes": [
+            "Implementar programa intensivo de pesquisa de vazamentos",
+            "Cadastrar e reparar vazamentos visíveis rapidamente",
+            "Considerar aumento da altura do reservatório",
+            "Substituir trechos com vazamentos recorrentes",
+            "Mobilizar a comunidade para identificação de vazamentos"
+        ]
+    }
+    
+    return relatorio
+
+def mostrar_pagina_configuracoes(detector):
+    """Página de configurações do sistema"""
+    st.header("⚙️ Configurações do Sistema")
+    st.markdown("Personalize as características do sistema de abastecimento")
+    
+    # Exibir características atuais
+    st.subheader("Características Atuais do Sistema")
+    caracteristicas = detector.caracteristicas_sistema
+    
+    # Criar DataFrame para exibir as características atuais de forma organizada
+    df_caracteristicas = pd.DataFrame({
+        'Característica': list(caracteristicas.keys()),
+        'Valor Atual': list(caracteristicas.values())
+    })
+    st.dataframe(df_caracteristicas)
+    
+    # Formulário para atualizar características
+    st.subheader("Atualizar Características")
+    st.markdown("Preencha os campos abaixo para atualizar as características do sistema. Deixe em branco para manter o valor atual.")
+    
+    # Lista das principais características para atualizar
+    caracteristicas_para_atualizar = [
+        'area_territorial', 'populacao', 'numero_ligacoes', 
+        'comprimento_rede', 'densidade_ramais', 'percentual_perdas', 'ivi'
+    ]
+    
+    # Criar formulário
+    with st.form("form_caracteristicas"):
+        # Dividir em colunas
+        col1, col2 = st.columns(2)
+        
+        # Dicionário para armazenar novas características
+        novas_caracteristicas = {}
+        
+        # Primeira coluna
+        with col1:
+            for carac in caracteristicas_para_atualizar[:3]:
+                valor_atual = detector.caracteristicas_sistema[carac]
+                valor = st.number_input(
+                    f"{carac.replace('_', ' ').title()} (atual: {valor_atual})",
+                    value=None,
+                    placeholder=f"Valor atual: {valor_atual}"
+                )
+                if valor is not None:
+                    novas_caracteristicas[carac] = valor
+        
+        # Segunda coluna
+        with col2:
+            for carac in caracteristicas_para_atualizar[3:]:
+                valor_atual = detector.caracteristicas_sistema[carac]
+                valor = st.number_input(
+                    f"{carac.replace('_', ' ').title()} (atual: {valor_atual})",
+                    value=None,
+                    placeholder=f"Valor atual: {valor_atual}"
+                )
+                if valor is not None:
+                    novas_caracteristicas[carac] = valor
+        
+        # Botão para atualizar
+        botao_atualizar = st.form_submit_button("Atualizar Características")
+    
+    if botao_atualizar:
+        if novas_caracteristicas:
+            # Atualizar características
+            for chave, valor in novas_caracteristicas.items():
+                if chave in detector.caracteristicas_sistema:
+                    detector.caracteristicas_sistema[chave] = valor
+                    st.success(f"Característica '{chave}' atualizada para: {valor}")
+            
+            st.success("Características atualizadas com sucesso!")
+        else:
+            st.info("Nenhuma característica foi alterada.")
+    
+    # Opções adicionais
+    st.markdown("---")
+    st.subheader("Opções Adicionais")
+    
+    # Baixar template de dados
+    st.markdown("##### Template de Dados")
+    if st.button("📄 Gerar Template de Dados"):
+        df_template = detector.gerar_dados_template()
+        st.success("Template gerado com dados padrão do Coleipa!")
+        st.dataframe(df_template)
+    
+    # Redefinir para valores padrão
+    st.markdown("##### Redefinir Sistema")
+    if st.button("Redefinir para Valores Padrão"):
+        # Recriar detector com valores padrão
+        st.session_state['detector'] = DetectorVazamentosColeipa()
+        st.success("Sistema redefinido para valores padrão!")
+        st.rerun()
 # CONFIGURAÇÃO RESPONSIVA E MOBILE
 # ============================================================================
 
@@ -1225,15 +1828,23 @@ def app_main():
         mostrar_pagina_dados_melhorada(detector)
     elif pagina_codigo == "fuzzy":
         mostrar_pagina_fuzzy_melhorada(detector)
+    elif pagina_codigo == "bayes":
+        mostrar_pagina_bayes(detector)
+    elif pagina_codigo == "mapas":
+        mostrar_pagina_mapa_calor(detector)
+    elif pagina_codigo == "simulacao":
+        mostrar_pagina_simulacao(detector)
     elif pagina_codigo == "analise":
         mostrar_pagina_analise_melhorada(detector)
+    elif pagina_codigo == "relatorio":
+        mostrar_pagina_relatorio(detector)
+    elif pagina_codigo == "config":
+        mostrar_pagina_configuracoes(detector)
     else:
         # Para outras páginas, manter funcionalidade básica
         st.info(f"Página {pagina_selecionada} em desenvolvimento...")
         st.markdown("Esta página manterá a funcionalidade original do sistema.")
 
-# ============================================================================
-# PÁGINAS MELHORADAS
 # ============================================================================
 
 def mostrar_pagina_dados_melhorada(detector):

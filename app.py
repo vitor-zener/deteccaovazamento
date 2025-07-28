@@ -1043,7 +1043,7 @@ def mostrar_pagina_inicio():
         - Análise estatística de vazão e pressão
         - Identificação de padrões críticos
         """)
-        st.image("https://via.placeholder.com/300x200?text=Dados+de+Monitoramento", use_column_width=True)
+        st.image("https://via.placeholder.com/300x200?text=Dados+de+Monitoramento", use_container_width=True)
     
     with col2:
         st.subheader("🧠 Inteligência Híbrida")

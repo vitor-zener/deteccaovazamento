@@ -1052,7 +1052,7 @@ def mostrar_pagina_inicio():
         - Modelo bayesiano para classificação
         - Mapas de calor para análise de riscos
         """)
-        st.image("https://via.placeholder.com/300x200?text=Sistema+Fuzzy", use_column_width=True)
+        st.image("https://via.placeholder.com/300x200?text=Sistema+Fuzzy", use_container_width=True)
     
     with col3:
         st.subheader("📊 Resultados e Relatórios")
@@ -1061,7 +1061,7 @@ def mostrar_pagina_inicio():
         - Análise de casos específicos
         - Relatórios detalhados com recomendações
         """)
-        st.image("https://via.placeholder.com/300x200?text=Relatorios", use_column_width=True)
+        st.image("https://via.placeholder.com/300x200?text=Relatorios", use_container_width=True)
     
     # Sobre o caso Coleipa
     st.markdown("---")

@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 import io
 import os
 
-# Matplotlib configuration
+# Configuração do Matplotlib
 plt.style.use('default')
 plt.rcParams['figure.figsize'] = [12, 8]
 plt.rcParams['figure.dpi'] = 100
@@ -21,36 +21,36 @@ plt.rcParams['axes.unicode_minus'] = False
 
 class DetectorVazamentosColeipa:
     """
-    Fuzzy-Bayes hybrid system for leak detection based on data from 
-    the Coleipa Drinking Water Supply System (SAAP)
+    Sistema híbrido Fuzzy-Bayes para detecção de vazamentos baseado em dados do 
+    Sistema de Abastecimento de Água Potável (SAAP) de Coleipa
     """
     
     def __init__(self, arquivo_dados=None):
         """
-        Initializes the system based on Coleipa article data or loads from a file
+        Inicializa o sistema baseado nos dados do artigo de Coleipa ou carrega de arquivo
         
-        Parameters:
-        arquivo_dados (str): Path to Excel or CSV file containing monitoring data
+        Parâmetros:
+        arquivo_dados (str): Caminho para arquivo Excel ou CSV contendo dados de monitoramento
         """
-        # Default system characteristics
+        # Características padrão do sistema
         self.caracteristicas_sistema = {
             'area_territorial': 319000,  # m²
-            'populacao': 1200,  # inhabitants
-            'numero_ligacoes': 300,  # connections
+            'populacao': 1200,  # habitantes
+            'numero_ligacoes': 300,  # ligações
             'comprimento_rede': 3,  # km
-            'densidade_ramais': 100,  # branches/km
-            'vazao_media_normal': 3.17,  # l/s (average of three days)
-            'pressao_media_normal': 5.22,  # mca (average of three days)
-            'perdas_reais_media': 102.87,  # m³/day
-            'volume_consumido_medio': 128.29,  # m³/day
+            'densidade_ramais': 100,  # ramais/km
+            'vazao_media_normal': 3.17,  # l/s (média de três dias)
+            'pressao_media_normal': 5.22,  # mca (média de três dias)
+            'perdas_reais_media': 102.87,  # m³/dia
+            'volume_consumido_medio': 128.29,  # m³/dia
             'percentual_perdas': 44.50,  # %
-            'iprl': 0.343,  # m³/connection.day
-            'ipri': 0.021,  # m³/connection.day
-            'ivi': 16.33  # Infrastructure Leakage Index
+            'iprl': 0.343,  # m³/ligação.dia
+            'ipri': 0.021,  # m³/ligação.dia
+            'ivi': 16.33  # Índice de Vazamentos da Infraestrutura
         }
         
-        # Default hardcoded data (used only if no file is provided)
-        self.dados_coleipa_default = {
+        # Dados padrão codificados (usados apenas se nenhum arquivo for fornecido)
+        self.dados_coleipa_padrao = {
             'hora': list(range(1, 25)),
             'vazao_dia1': [8.11, 7.83, 7.76, 7.80, 8.08, 9.69, 11.52, 11.92, 13.08, 14.22, 15.68, 14.55, 14.78, 13.16, 12.81, 11.64, 13.02, 13.40, 13.55, 12.94, 12.63, 11.45, 9.88, 8.30],
             'pressao_dia1': [6.89, 7.25, 7.12, 6.51, 6.42, 6.18, 4.83, 3.57, 4.67, 3.92, 3.70, 3.11, 2.68, 2.55, 3.34, 3.77, 4.70, 4.66, 4.69, 3.77, 4.78, 5.73, 6.24, 6.36],
@@ -60,140 +60,136 @@ class DetectorVazamentosColeipa:
             'pressao_dia3': [6.91, 7.26, 7.12, 7.30, 7.16, 7.05, 6.43, 3.96, 4.70, 3.77, 3.97, 4.06, 4.13, 3.78, 3.12, 3.34, 5.55, 5.41, 4.93, 3.81, 4.37, 5.61, 6.36, 6.49]
         }
         
-        # Try to load data from file if provided
+        # Tentar carregar dados do arquivo se fornecido
         if arquivo_dados:
             self.dados_coleipa = self.carregar_dados_arquivo(arquivo_dados)
-            st.success(f"Data loaded from file")
+            st.success("Dados carregados do arquivo")
         else:
-            self.dados_coleipa = self.dados_coleipa_default
-            st.info("Using default Coleipa data (no file provided)")
+            self.dados_coleipa = self.dados_coleipa_padrao
+            st.info("Usando dados padrão de Coleipa (nenhum arquivo fornecido)")
         
-        # Definition of fuzzy parameters based on real Coleipa data
-        # Flow rate in m³/h (converted from l/s)
+        # Definição dos parâmetros fuzzy baseados nos dados reais de Coleipa
+        # Vazão em m³/h (convertida de l/s)
         self.param_vazao = {
-            'BAIXA': {'range': [7, 9, 11]},     # Night flow rates
-            'NORMAL': {'range': [9, 11.5, 14]},  # Transition flow rates
-            'ALTA': {'range': [12, 15, 16]}     # Peak flow rates
+            'BAIXA': {'faixa': [7, 9, 11]},     # Vazões noturnas
+            'NORMAL': {'faixa': [9, 11.5, 14]},  # Vazões de transição
+            'ALTA': {'faixa': [12, 15, 16]}     # Vazões de pico
         }
         
-        # Pressure in mca (original data from the article)
+        # Pressão em mca (dados originais do artigo)
         self.param_pressao = {
-            'BAIXA': {'range': [0, 3, 5]},      # Below NBR minimum (10 mca)
-            'MEDIA': {'range': [4, 6, 8]},      # Observed operational range
-            'ALTA': {'range': [6, 8, 10]}      # Observed maximums
+            'BAIXA': {'faixa': [0, 3, 5]},      # Abaixo do mínimo NBR (10 mca)
+            'MEDIA': {'faixa': [4, 6, 8]},      # Faixa operacional observada
+            'ALTA': {'faixa': [6, 8, 10]}      # Máximos observados
         }
         
-        # IVI based on World Bank classification
+        # IVI baseado na classificação do Banco Mundial
         self.param_ivi = {
-            'BOM': {'range': [1, 2, 4]},        # Category A
-            'REGULAR': {'range': [4, 6, 8]},    # Category B
-            'RUIM': {'range': [8, 12, 16]},     # Category C
-            'MUITO_RUIM': {'range': [16, 20, 25]}  # Category D (Coleipa = 16.33)
+            'BOM': {'faixa': [1, 2, 4]},        # Categoria A
+            'REGULAR': {'faixa': [4, 6, 8]},    # Categoria B
+            'RUIM': {'faixa': [8, 12, 16]},     # Categoria C
+            'MUITO_RUIM': {'faixa': [16, 20, 25]}  # Categoria D (Coleipa = 16.33)
         }
         
-        # Leak risk
+        # Risco de vazamento
         self.param_risco = {
-            'MUITO_BAIXO': {'range': [0, 10, 25]},
-            'BAIXO': {'range': [15, 30, 45]},
-            'MEDIO': {'range': [35, 50, 65]},
-            'ALTO': {'range': [55, 70, 85]},
-            'MUITO_ALTO': {'range': [75, 90, 100]}
+            'MUITO_BAIXO': {'faixa': [0, 10, 25]},
+            'BAIXO': {'faixa': [15, 30, 45]},
+            'MEDIO': {'faixa': [35, 50, 65]},
+            'ALTO': {'faixa': [55, 70, 85]},
+            'MUITO_ALTO': {'faixa': [75, 90, 100]}
         }
         
-        # Component initialization
+        # Inicialização dos componentes
         self.sistema_fuzzy = None
         self.modelo_bayes = None
     
     def carregar_dados_arquivo(self, arquivo_uploaded):
         """
-        Loads monitoring data from an Excel or CSV file from Streamlit
+        Carrega dados de monitoramento de um arquivo Excel ou CSV do Streamlit
         
-        Parameters:
-        arquivo_uploaded: File uploaded by Streamlit
+        Parâmetros:
+        arquivo_uploaded: Arquivo carregado pelo Streamlit
         
-        Returns:
-        dict: Dictionary with loaded data
+        Retorna:
+        dict: Dicionário com os dados carregados
         """
         try:
-            # Determine file type by extension
+            # Determinar o tipo de arquivo pela extensão
             nome_arquivo = arquivo_uploaded.name
             nome, extensao = os.path.splitext(nome_arquivo)
             extensao = extensao.lower()
             
             if extensao == '.xlsx' or extensao == '.xls':
-                # Load Excel file
+                # Carregar arquivo Excel
                 df = pd.read_excel(arquivo_uploaded)
-                st.success("Excel file loaded successfully")
+                st.success("Arquivo Excel carregado com sucesso")
             elif extensao == '.csv':
-                # Load CSV file
+                # Carregar arquivo CSV
                 df = pd.read_csv(arquivo_uploaded)
-                st.success("CSV file loaded successfully")
+                st.success("Arquivo CSV carregado com sucesso")
             else:
-                st.error(f"Unsupported file format: {extensao}. Use Excel (.xlsx, .xls) or CSV (.csv)")
-                return self.dados_coleipa_default
+                st.error(f"Formato de arquivo não suportado: {extensao}. Use Excel (.xlsx, .xls) ou CSV (.csv)")
+                return self.dados_coleipa_padrao
             
-            # Validate data structure
-            # The file must have columns: hora, vazao_dia1, pressao_dia1, etc.
+            # Validar estrutura dos dados
+            # O arquivo deve ter colunas: hora, vazao_dia1, pressao_dia1, etc.
             colunas_necessarias = ['hora', 'vazao_dia1', 'pressao_dia1', 'vazao_dia2', 
                                   'pressao_dia2', 'vazao_dia3', 'pressao_dia3']
             
             for coluna in colunas_necessarias:
                 if coluna not in df.columns:
-                    st.warning(f"Column '{coluna}' not found in the file. Please check the data format.")
+                    st.warning(f"Coluna '{coluna}' não encontrada no arquivo. Verifique o formato dos dados.")
             
-            # Convert DataFrame to dictionary
+            # Converter DataFrame para dicionário
             dados = {}
             for coluna in df.columns:
                 dados[coluna] = df[coluna].tolist()
             
-            # Check data length
-            if len(dados['hora']) != 24:
-                st.warning(f"The number of hours in the file ({len(dados['hora'])}) is different from expected (24).")
+            # Verificar tamanho dos dados
+            if len(dados.get('hora', [])) != 24:
+                st.warning(f"O número de horas no arquivo ({len(dados.get('hora', []))}) é diferente do esperado (24).")
             
-            # Reset fuzzy system to force recreation with new data
+            # Resetar sistema fuzzy para forçar recriação com novos dados
             self.sistema_fuzzy = None
             
             return dados
             
         except Exception as e:
-            st.error(f"Error loading file: {e}")
-            st.info("Using default Coleipa data as fallback")
-            return self.dados_coleipa_default
+            st.error(f"Erro ao carregar arquivo: {e}")
+            st.info("Usando dados padrão de Coleipa como alternativa")
+            return self.dados_coleipa_padrao
     
-    def gerar_dados_template(self):
+    def gerar_dados_modelo(self):
         """
-        Generates default data for download as template
+        Gera dados padrão para download como modelo
         """
-        df = pd.DataFrame(self.dados_coleipa_default)
+        df = pd.DataFrame(self.dados_coleipa_padrao)
         return df
     
     def criar_dataframe_coleipa(self):
-        """Creates DataFrame with real Coleipa monitoring data"""
+        """Cria DataFrame com dados reais de monitoramento de Coleipa"""
         df = pd.DataFrame()
         
-        # Calculate means and standard deviations
+        # Calcular médias e desvios padrão
         for hora in range(1, 25):
             idx = hora - 1
             vazao_valores = []
             pressao_valores = []
             
-            # Check if we have data for this hour
-            if idx < len(self.dados_coleipa['hora']):
-                if 'vazao_dia1' in self.dados_coleipa and idx < len(self.dados_coleipa['vazao_dia1']):
-                    vazao_valores.append(self.dados_coleipa['vazao_dia1'][idx])
-                if 'vazao_dia2' in self.dados_coleipa and idx < len(self.dados_coleipa['vazao_dia2']):
-                    vazao_valores.append(self.dados_coleipa['vazao_dia2'][idx])
-                if 'vazao_dia3' in self.dados_coleipa and idx < len(self.dados_coleipa['vazao_dia3']):
-                    vazao_valores.append(self.dados_coleipa['vazao_dia3'][idx])
+            # Verificar se temos dados para esta hora
+            if idx < len(self.dados_coleipa.get('hora', [])):
+                for dia in ['dia1', 'dia2', 'dia3']:
+                    col_vazao = f'vazao_{dia}'
+                    col_pressao = f'pressao_{dia}'
                     
-                if 'pressao_dia1' in self.dados_coleipa and idx < len(self.dados_coleipa['pressao_dia1']):
-                    pressao_valores.append(self.dados_coleipa['pressao_dia1'][idx])
-                if 'pressao_dia2' in self.dados_coleipa and idx < len(self.dados_coleipa['pressao_dia2']):
-                    pressao_valores.append(self.dados_coleipa['pressao_dia2'][idx])
-                if 'pressao_dia3' in self.dados_coleipa and idx < len(self.dados_coleipa['pressao_dia3']):
-                    pressao_valores.append(self.dados_coleipa['pressao_dia3'][idx])
+                    if col_vazao in self.dados_coleipa and idx < len(self.dados_coleipa[col_vazao]):
+                        vazao_valores.append(self.dados_coleipa[col_vazao][idx])
+                    
+                    if col_pressao in self.dados_coleipa and idx < len(self.dados_coleipa[col_pressao]):
+                        pressao_valores.append(self.dados_coleipa[col_pressao][idx])
             
-            # If we don't have enough data, skip this hour
+            # Se não temos dados suficientes, pular esta hora
             if len(vazao_valores) == 0 or len(pressao_valores) == 0:
                 continue
                 
@@ -203,12 +199,12 @@ class DetectorVazamentosColeipa:
                 'Vazao_Dia2': [vazao_valores[1] if len(vazao_valores) > 1 else None],
                 'Vazao_Dia3': [vazao_valores[2] if len(vazao_valores) > 2 else None],
                 'Vazao_Media': [np.mean(vazao_valores)],
-                'Vazao_DP': [np.std(vazao_valores)],
+                'Vazao_DP': [np.std(vazao_valores) if len(vazao_valores) > 1 else 0],
                 'Pressao_Dia1': [pressao_valores[0] if len(pressao_valores) > 0 else None],
                 'Pressao_Dia2': [pressao_valores[1] if len(pressao_valores) > 1 else None],
                 'Pressao_Dia3': [pressao_valores[2] if len(pressao_valores) > 2 else None],
                 'Pressao_Media': [np.mean(pressao_valores)],
-                'Pressao_DP': [np.std(pressao_valores)],
+                'Pressao_DP': [np.std(pressao_valores) if len(pressao_valores) > 1 else 0],
                 'IVI': [self.caracteristicas_sistema['ivi']],
                 'Perdas_Detectadas': [1 if np.mean(vazao_valores) > 13 and np.mean(pressao_valores) < 5 else 0]
             })], ignore_index=True)
@@ -216,87 +212,87 @@ class DetectorVazamentosColeipa:
         return df
     
     def criar_sistema_fuzzy(self):
-        """Creates fuzzy system based on Coleipa data"""
-        # Define universes based on real data
+        """Cria sistema fuzzy baseado nos dados de Coleipa"""
+        # Definir universos baseados nos dados reais
         vazao = ctrl.Antecedent(np.arange(7, 17, 0.1), 'vazao')
         pressao = ctrl.Antecedent(np.arange(0, 11, 0.1), 'pressao')
         ivi = ctrl.Antecedent(np.arange(1, 26, 0.1), 'ivi')
         risco_vazamento = ctrl.Consequent(np.arange(0, 101, 1), 'risco_vazamento')
         
-        # Define fuzzy sets
+        # Definir conjuntos fuzzy
         for nome, param in self.param_vazao.items():
-            vazao[nome] = fuzz.trimf(vazao.universe, param['range'])
+            vazao[nome] = fuzz.trimf(vazao.universe, param['faixa'])
         
         for nome, param in self.param_pressao.items():
-            pressao[nome] = fuzz.trimf(pressao.universe, param['range'])
+            pressao[nome] = fuzz.trimf(pressao.universe, param['faixa'])
         
         for nome, param in self.param_ivi.items():
-            ivi[nome] = fuzz.trimf(ivi.universe, param['range'])
+            ivi[nome] = fuzz.trimf(ivi.universe, param['faixa'])
         
         for nome, param in self.param_risco.items():
-            risco_vazamento[nome] = fuzz.trimf(risco_vazamento.universe, param['range'])
+            risco_vazamento[nome] = fuzz.trimf(risco_vazamento.universe, param['faixa'])
         
-        # Rules based on Coleipa analysis and expert knowledge
+        # Regras baseadas na análise de Coleipa e conhecimento especialista
         regras = [
-            # Rules for leak detection based on Coleipa pattern
-            # HIGH flow + LOW pressure = strong indication of leak
+            # Regras para detecção de vazamentos baseadas no padrão de Coleipa
+            # Vazão ALTA + pressão BAIXA = forte indicação de vazamento
             ctrl.Rule(vazao['ALTA'] & pressao['BAIXA'] & ivi['MUITO_RUIM'], risco_vazamento['MUITO_ALTO']),
             ctrl.Rule(vazao['ALTA'] & pressao['BAIXA'] & ivi['RUIM'], risco_vazamento['ALTO']),
             ctrl.Rule(vazao['ALTA'] & pressao['BAIXA'] & ivi['REGULAR'], risco_vazamento['ALTO']),
             ctrl.Rule(vazao['ALTA'] & pressao['BAIXA'] & ivi['BOM'], risco_vazamento['MEDIO']),
             
-            # NORMAL flow + LOW pressure = moderate risk
+            # Vazão NORMAL + pressão BAIXA = risco moderado
             ctrl.Rule(vazao['NORMAL'] & pressao['BAIXA'] & ivi['MUITO_RUIM'], risco_vazamento['ALTO']),
             ctrl.Rule(vazao['NORMAL'] & pressao['BAIXA'] & ivi['RUIM'], risco_vazamento['MEDIO']),
             ctrl.Rule(vazao['NORMAL'] & pressao['BAIXA'] & ivi['REGULAR'], risco_vazamento['MEDIO']),
             ctrl.Rule(vazao['NORMAL'] & pressao['BAIXA'] & ivi['BOM'], risco_vazamento['BAIXO']),
             
-            # LOW flow (normal night operation)
+            # Vazão BAIXA (operação noturna normal)
             ctrl.Rule(vazao['BAIXA'] & pressao['BAIXA'] & ivi['MUITO_RUIM'], risco_vazamento['MEDIO']),
             ctrl.Rule(vazao['BAIXA'] & pressao['MEDIA'] & ivi['MUITO_RUIM'], risco_vazamento['BAIXO']),
             ctrl.Rule(vazao['BAIXA'] & pressao['ALTA'] & ivi['MUITO_RUIM'], risco_vazamento['BAIXO']),
             
-            # Normal operation
+            # Operação normal
             ctrl.Rule(vazao['NORMAL'] & pressao['MEDIA'] & ivi['BOM'], risco_vazamento['MUITO_BAIXO']),
             ctrl.Rule(vazao['NORMAL'] & pressao['ALTA'] & ivi['BOM'], risco_vazamento['MUITO_BAIXO']),
             
-            # Specific rules for the Coleipa case (IVI = 16.33, category D)
-            ctrl.Rule(ivi['MUITO_RUIM'], risco_vazamento['MEDIO']),  # High IVI always indicates risk
+            # Regras específicas para o caso Coleipa (IVI = 16.33, categoria D)
+            ctrl.Rule(ivi['MUITO_RUIM'], risco_vazamento['MEDIO']),  # IVI alto sempre indica risco
             
-            # Typical pattern observed in Coleipa during leaks
+            # Padrão típico observado em Coleipa durante vazamentos
             ctrl.Rule(vazao['ALTA'] & pressao['BAIXA'], risco_vazamento['ALTO'])
         ]
         
-        # Create control system
+        # Criar sistema de controle
         sistema_ctrl = ctrl.ControlSystem(regras)
         self.sistema_fuzzy = ctrl.ControlSystemSimulation(sistema_ctrl)
         
         return vazao, pressao, ivi, risco_vazamento
     
     def visualizar_conjuntos_fuzzy(self):
-        """Visualizes fuzzy sets based on Coleipa data"""
-        # Create fuzzy system if it doesn't exist yet
+        """Visualiza conjuntos fuzzy baseados nos dados de Coleipa"""
+        # Criar sistema fuzzy se ainda não existir
         vazao, pressao, ivi, risco_vazamento = self.criar_sistema_fuzzy()
         
         fig, axes = plt.subplots(2, 2, figsize=(15, 12))
         
-        # Flow rate
+        # Vazão
         axes[0, 0].clear()
         for nome in self.param_vazao.keys():
             axes[0, 0].plot(vazao.universe, vazao[nome].mf, label=nome, linewidth=2)
-        axes[0, 0].set_title('Fuzzy Sets - Flow Rate (based on Coleipa data)')
-        axes[0, 0].set_xlabel('Flow Rate (m³/h)')
-        axes[0, 0].set_ylabel('Membership Degree')
+        axes[0, 0].set_title('Conjuntos Fuzzy - Vazão (baseado em dados de Coleipa)')
+        axes[0, 0].set_xlabel('Vazão (m³/h)')
+        axes[0, 0].set_ylabel('Grau de Pertinência')
         axes[0, 0].legend()
         axes[0, 0].grid(True, alpha=0.3)
         
-        # Pressure
+        # Pressão
         axes[0, 1].clear()
         for nome in self.param_pressao.keys():
             axes[0, 1].plot(pressao.universe, pressao[nome].mf, label=nome, linewidth=2)
-        axes[0, 1].set_title('Fuzzy Sets - Pressure (based on Coleipa data)')
-        axes[0, 1].set_xlabel('Pressure (mca)')
-        axes[0, 1].set_ylabel('Membership Degree')
+        axes[0, 1].set_title('Conjuntos Fuzzy - Pressão (baseado em dados de Coleipa)')
+        axes[0, 1].set_xlabel('Pressão (mca)')
+        axes[0, 1].set_ylabel('Grau de Pertinência')
         axes[0, 1].legend()
         axes[0, 1].grid(True, alpha=0.3)
         
@@ -304,21 +300,21 @@ class DetectorVazamentosColeipa:
         axes[1, 0].clear()
         for nome in self.param_ivi.keys():
             axes[1, 0].plot(ivi.universe, ivi[nome].mf, label=nome, linewidth=2)
-        axes[1, 0].set_title('Fuzzy Sets - IVI (World Bank Classification)')
+        axes[1, 0].set_title('Conjuntos Fuzzy - IVI (Classificação Banco Mundial)')
         axes[1, 0].set_xlabel('IVI')
-        axes[1, 0].set_ylabel('Membership Degree')
+        axes[1, 0].set_ylabel('Grau de Pertinência')
         axes[1, 0].legend()
         axes[1, 0].grid(True, alpha=0.3)
         axes[1, 0].axvline(x=self.caracteristicas_sistema['ivi'], color='red', linestyle='--', 
                           label=f"Coleipa ({self.caracteristicas_sistema['ivi']:.2f})")
         
-        # Risk
+        # Risco
         axes[1, 1].clear()
         for nome in self.param_risco.keys():
             axes[1, 1].plot(risco_vazamento.universe, risco_vazamento[nome].mf, label=nome, linewidth=2)
-        axes[1, 1].set_title('Fuzzy Sets - Leak Risk')
-        axes[1, 1].set_xlabel('Risk (%)')
-        axes[1, 1].set_ylabel('Membership Degree')
+        axes[1, 1].set_title('Conjuntos Fuzzy - Risco de Vazamento')
+        axes[1, 1].set_xlabel('Risco (%)')
+        axes[1, 1].set_ylabel('Grau de Pertinência')
         axes[1, 1].legend()
         axes[1, 1].grid(True, alpha=0.3)
         
@@ -326,64 +322,72 @@ class DetectorVazamentosColeipa:
         return fig
 
     def visualizar_dados_coleipa(self):
-        """Visualizes real Coleipa monitoring data"""
+        """Visualiza dados reais de monitoramento de Coleipa"""
         df = self.criar_dataframe_coleipa()
+        
+        if df.empty:
+            st.error("Não foi possível criar o DataFrame com os dados. Verifique os dados de entrada.")
+            return None, {}, df
         
         fig, axes = plt.subplots(3, 1, figsize=(15, 12))
         
-        # Chart 1: Flow rates for the three days
-        axes[0].plot(df['Hora'], df['Vazao_Dia1'], 'b-o', label='Day 1', alpha=0.7)
-        axes[0].plot(df['Hora'], df['Vazao_Dia2'], 'r-s', label='Day 2', alpha=0.7)
-        axes[0].plot(df['Hora'], df['Vazao_Dia3'], 'g-^', label='Day 3', alpha=0.7)
-        axes[0].plot(df['Hora'], df['Vazao_Media'], 'k-', linewidth=3, label='Average')
+        # Gráfico 1: Vazões dos três dias
+        axes[0].plot(df['Hora'], df['Vazao_Dia1'], 'b-o', label='Dia 1', alpha=0.7)
+        if 'Vazao_Dia2' in df.columns and not df['Vazao_Dia2'].isna().all():
+            axes[0].plot(df['Hora'], df['Vazao_Dia2'], 'r-s', label='Dia 2', alpha=0.7)
+        if 'Vazao_Dia3' in df.columns and not df['Vazao_Dia3'].isna().all():
+            axes[0].plot(df['Hora'], df['Vazao_Dia3'], 'g-^', label='Dia 3', alpha=0.7)
+        axes[0].plot(df['Hora'], df['Vazao_Media'], 'k-', linewidth=3, label='Média')
         axes[0].fill_between(df['Hora'], 
                            df['Vazao_Media'] - df['Vazao_DP'], 
                            df['Vazao_Media'] + df['Vazao_DP'], 
                            alpha=0.2, color='gray', label='±1σ')
-        axes[0].set_title('Flow Rate Monitoring - SAAP Coleipa (72 hours)')
-        axes[0].set_xlabel('Hour of Day')
-        axes[0].set_ylabel('Flow Rate (m³/h)')
+        axes[0].set_title('Monitoramento de Vazão - SAAP Coleipa (72 horas)')
+        axes[0].set_xlabel('Hora do Dia')
+        axes[0].set_ylabel('Vazão (m³/h)')
         axes[0].legend()
         axes[0].grid(True, alpha=0.3)
         
-        # Chart 2: Pressures for the three days
-        axes[1].plot(df['Hora'], df['Pressao_Dia1'], 'b-o', label='Day 1', alpha=0.7)
-        axes[1].plot(df['Hora'], df['Pressao_Dia2'], 'r-s', label='Day 2', alpha=0.7)
-        axes[1].plot(df['Hora'], df['Pressao_Dia3'], 'g-^', label='Day 3', alpha=0.7)
-        axes[1].plot(df['Hora'], df['Pressao_Media'], 'k-', linewidth=3, label='Average')
+        # Gráfico 2: Pressões dos três dias
+        axes[1].plot(df['Hora'], df['Pressao_Dia1'], 'b-o', label='Dia 1', alpha=0.7)
+        if 'Pressao_Dia2' in df.columns and not df['Pressao_Dia2'].isna().all():
+            axes[1].plot(df['Hora'], df['Pressao_Dia2'], 'r-s', label='Dia 2', alpha=0.7)
+        if 'Pressao_Dia3' in df.columns and not df['Pressao_Dia3'].isna().all():
+            axes[1].plot(df['Hora'], df['Pressao_Dia3'], 'g-^', label='Dia 3', alpha=0.7)
+        axes[1].plot(df['Hora'], df['Pressao_Media'], 'k-', linewidth=3, label='Média')
         axes[1].fill_between(df['Hora'], 
                            df['Pressao_Media'] - df['Pressao_DP'], 
                            df['Pressao_Media'] + df['Pressao_DP'], 
                            alpha=0.2, color='gray', label='±1σ')
-        axes[1].axhline(y=10, color='red', linestyle='--', label='NBR 12218 Minimum (10 mca)')
-        axes[1].set_title('Pressure Monitoring - SAAP Coleipa (72 hours)')
-        axes[1].set_xlabel('Hour of Day')
-        axes[1].set_ylabel('Pressure (mca)')
+        axes[1].axhline(y=10, color='red', linestyle='--', label='Mínimo NBR 12218 (10 mca)')
+        axes[1].set_title('Monitoramento de Pressão - SAAP Coleipa (72 horas)')
+        axes[1].set_xlabel('Hora do Dia')
+        axes[1].set_ylabel('Pressão (mca)')
         axes[1].legend()
         axes[1].grid(True, alpha=0.3)
         
-        # Chart 3: Inverse relationship Flow vs Pressure
+        # Gráfico 3: Relação inversa Vazão vs Pressão
         ax2 = axes[2].twinx()
-        line1 = axes[2].plot(df['Hora'], df['Vazao_Media'], 'b-', linewidth=2, label='Average Flow')
-        line2 = ax2.plot(df['Hora'], df['Pressao_Media'], 'r-', linewidth=2, label='Average Pressure')
+        linha1 = axes[2].plot(df['Hora'], df['Vazao_Media'], 'b-', linewidth=2, label='Vazão Média')
+        linha2 = ax2.plot(df['Hora'], df['Pressao_Media'], 'r-', linewidth=2, label='Pressão Média')
         
-        axes[2].set_xlabel('Hour of Day')
-        axes[2].set_ylabel('Flow Rate (m³/h)', color='b')
-        ax2.set_ylabel('Pressure (mca)', color='r')
+        axes[2].set_xlabel('Hora do Dia')
+        axes[2].set_ylabel('Vazão (m³/h)', color='b')
+        ax2.set_ylabel('Pressão (mca)', color='r')
         axes[2].tick_params(axis='y', labelcolor='b')
         ax2.tick_params(axis='y', labelcolor='r')
         
-        # Combine legends
-        lines = line1 + line2
-        labels = [l.get_label() for l in lines]
-        axes[2].legend(lines, labels, loc='upper left')
-        axes[2].set_title('Inverse Relationship: Flow × Pressure (Sectorized Network)')
+        # Combinar legendas
+        linhas = linha1 + linha2
+        rotulos = [l.get_label() for l in linhas]
+        axes[2].legend(linhas, rotulos, loc='upper left')
+        axes[2].set_title('Relação Inversa: Vazão × Pressão (Rede Setorizada)')
         axes[2].grid(True, alpha=0.3)
         
         plt.tight_layout()
         
-        # Return the figure and statistics
-        stats = {
+        # Retornar a figura e estatísticas
+        estatisticas = {
             "vazao_min": df['Vazao_Media'].min(),
             "vazao_min_hora": df.loc[df['Vazao_Media'].idxmin(), 'Hora'],
             "vazao_max": df['Vazao_Media'].max(),
@@ -394,57 +398,64 @@ class DetectorVazamentosColeipa:
             "pressao_max_hora": df.loc[df['Pressao_Media'].idxmax(), 'Hora'],
             "vazao_ratio": df['Vazao_Media'].min()/df['Vazao_Media'].max()*100,
             "horas_pressao_baixa": len(df[df['Pressao_Media'] < 10]),
-            "perc_pressao_baixa": len(df[df['Pressao_Media'] < 10])/24*100
+            "perc_pressao_baixa": len(df[df['Pressao_Media'] < 10])/len(df)*100
         }
         
-        return fig, stats, df
+        return fig, estatisticas, df
     
     def calcular_ivi_automatico(self, arquivo_uploaded=None):
         """
-        Automatically calculates IVI (Infrastructure Leakage Index) 
-        from flow and pressure data
+        Calcula automaticamente o IVI (Índice de Vazamentos da Infraestrutura) 
+        a partir dos dados de vazão e pressão
         
-        Parameters:
-        arquivo_uploaded: Optional file with additional data for IVI calculation
+        Parâmetros:
+        arquivo_uploaded: Arquivo opcional com dados adicionais para cálculo do IVI
         
-        Returns:
-        float: Calculated IVI value
-        dict: Dictionary with calculation components (CARL, UARL, etc.)
+        Retorna:
+        float: Valor do IVI calculado
+        dict: Dicionário com componentes do cálculo (CARL, UARL, etc.)
         """
-        # Create dataframe with monitoring data
+        # Criar dataframe com dados de monitoramento
         df_monitoramento = self.criar_dataframe_coleipa()
         
-        # Extract system parameters
+        if df_monitoramento.empty:
+            st.error("Não foi possível calcular o IVI. Dados de monitoramento insuficientes.")
+            return self.caracteristicas_sistema['ivi'], {}
+        
+        # Extrair parâmetros do sistema
         comprimento_rede = self.caracteristicas_sistema['comprimento_rede']  # km
-        numero_ligacoes = self.caracteristicas_sistema['numero_ligacoes']    # connections
+        numero_ligacoes = self.caracteristicas_sistema['numero_ligacoes']    # ligações
         pressao_media = df_monitoramento['Pressao_Media'].mean()            # mca
         
-        # Calculate minimum night flow (average of hours 1-4)
+        # Calcular vazão mínima noturna (média das horas 1-4)
         horas_noturnas = df_monitoramento[(df_monitoramento['Hora'] >= 1) & (df_monitoramento['Hora'] <= 4)]
-        vazao_minima_noturna = horas_noturnas['Vazao_Media'].mean()  # m³/h
+        if horas_noturnas.empty:
+            vazao_minima_noturna = df_monitoramento['Vazao_Media'].min()
+        else:
+            vazao_minima_noturna = horas_noturnas['Vazao_Media'].mean()  # m³/h
         
-        # Try to load additional data from file if provided
+        # Tentar carregar dados adicionais do arquivo se fornecido
         dados_adicionais = {}
         if arquivo_uploaded:
             try:
-                # Determine file type by extension
+                # Determinar tipo de arquivo pela extensão
                 nome_arquivo = arquivo_uploaded.name
                 nome, extensao = os.path.splitext(nome_arquivo)
                 extensao = extensao.lower()
                 
                 if extensao == '.xlsx' or extensao == '.xls':
                     df_ivi = pd.read_excel(arquivo_uploaded, sheet_name='Calculo_IVI')
-                    st.success("Data for IVI calculation loaded successfully")
+                    st.success("Dados para cálculo de IVI carregados com sucesso")
                 elif extensao == '.csv':
                     df_ivi = pd.read_csv(arquivo_uploaded)
-                    st.success("Data for IVI calculation loaded successfully")
+                    st.success("Dados para cálculo de IVI carregados com sucesso")
                 else:
-                    st.warning(f"Unsupported format for automatic IVI calculation: {extensao}")
+                    st.warning(f"Formato não suportado para cálculo automático de IVI: {extensao}")
                     df_ivi = None
                 
-                # If we were able to load the file, extract relevant data
+                # Se conseguimos carregar o arquivo, extrair dados relevantes
                 if df_ivi is not None:
-                    # Look for specific columns in the file
+                    # Procurar por colunas específicas no arquivo
                     colunas_esperadas = ['volume_diario', 'consumo_autorizado', 'perdas_aparentes']
                     if all(col in df_ivi.columns for col in colunas_esperadas):
                         dados_adicionais = {
@@ -452,77 +463,77 @@ class DetectorVazamentosColeipa:
                             'consumo_autorizado': df_ivi['consumo_autorizado'].mean(),
                             'perdas_aparentes': df_ivi['perdas_aparentes'].mean()
                         }
-                        st.success("Additional data for IVI calculation found!")
+                        st.success("Dados adicionais para cálculo de IVI encontrados!")
                     else:
-                        st.info("File format recognized, but required columns not found.")
-                        st.info("Using alternative method for IVI calculation.")
+                        st.info("Formato de arquivo reconhecido, mas colunas necessárias não encontradas.")
+                        st.info("Usando método alternativo para cálculo de IVI.")
                         
             except Exception as e:
-                st.warning(f"Error processing file for IVI calculation: {e}")
-                st.info("Using alternative method for IVI calculation.")
+                st.warning(f"Erro ao processar arquivo para cálculo de IVI: {e}")
+                st.info("Usando método alternativo para cálculo de IVI.")
         
-        # Method 1: If we have complete data from the file
-        if 'volume_diario' in dados_adicionais and 'consumo_autorizado' in dados_adicionais and 'perdas_aparentes' in dados_adicionais:
-            # Calculate real losses (CARL) in m³/day
-            volume_diario = dados_adicionais['volume_diario']  # m³/day
-            consumo_autorizado = dados_adicionais['consumo_autorizado']  # m³/day
-            perdas_aparentes = dados_adicionais['perdas_aparentes']  # m³/day
+        # Método 1: Se temos dados completos do arquivo
+        if all(key in dados_adicionais for key in ['volume_diario', 'consumo_autorizado', 'perdas_aparentes']):
+            # Calcular perdas reais (CARL) em m³/dia
+            volume_diario = dados_adicionais['volume_diario']  # m³/dia
+            consumo_autorizado = dados_adicionais['consumo_autorizado']  # m³/dia
+            perdas_aparentes = dados_adicionais['perdas_aparentes']  # m³/dia
             
-            perdas_reais = volume_diario - consumo_autorizado - perdas_aparentes  # m³/day
+            perdas_reais = volume_diario - consumo_autorizado - perdas_aparentes  # m³/dia
             
-        # Method 2: Based on minimum night flow and estimates
+        # Método 2: Baseado na vazão mínima noturna e estimativas
         else:
-            # Estimate legitimate night consumption (typically 6-8% of daily consumption)
-            consumo_noturno_perc = 0.07  # 7% is a typical value
+            # Estimar consumo noturno legítimo (tipicamente 6-8% do consumo diário)
+            consumo_noturno_perc = 0.07  # 7% é um valor típico
             consumo_legitimo_noturno = vazao_minima_noturna * consumo_noturno_perc  # m³/h
             
-            # Estimate night leakage
+            # Estimar vazamento noturno
             vazamento_noturno = vazao_minima_noturna - consumo_legitimo_noturno  # m³/h
             
-            # Convert to daily volume (N1 factor from FAVAD methodology)
-            # N1 factor relates leakage variation with pressure
-            fator_n1 = 1.15  # Typical value between 0.5 and 1.5
+            # Converter para volume diário (fator N1 da metodologia FAVAD)
+            # Fator N1 relaciona variação de vazamento com pressão
+            fator_n1 = 1.15  # Valor típico entre 0.5 e 1.5
             fator_dia_noite = 24 * ((pressao_media / pressao_media) ** fator_n1)
             
-            # Calculate daily real losses
-            perdas_reais = vazamento_noturno * fator_dia_noite  # m³/day
+            # Calcular perdas reais diárias
+            perdas_reais = vazamento_noturno * fator_dia_noite  # m³/dia
         
-        # Calculate UARL (Unavoidable Annual Real Losses) using the standard IWA formula
-        # UARL (liters/day) = (18 × Lm + 0.8 × Nc + 25 × Lp) × P
-        # Where:
-        # Lm = network length (km)
-        # Nc = number of connections
-        # Lp = total length of service connections (km) - estimated as Nc/density_connections
-        # P = average pressure (mca)
+        # Calcular UARL (Unavoidable Annual Real Losses) usando fórmula padrão IWA
+        # UARL (litros/dia) = (18 × Lm + 0.8 × Nc + 25 × Lp) × P
+        # Onde:
+        # Lm = comprimento da rede (km)
+        # Nc = número de ligações
+        # Lp = comprimento total dos ramais (km) - estimado como Nc/densidade_ligacoes
+        # P = pressão média (mca)
         
         densidade_ramais = self.caracteristicas_sistema['densidade_ramais']
         comprimento_ramais = numero_ligacoes / densidade_ramais  # km
         
-        # UARL calculation in liters/day
+        # Cálculo UARL em litros/dia
         uarl_litros_dia = (18 * comprimento_rede + 0.8 * numero_ligacoes + 25 * comprimento_ramais) * pressao_media
         
-        # Convert to m³/day
+        # Converter para m³/dia
         uarl_m3_dia = uarl_litros_dia / 1000
         
-        # Calculate IPRL (Real Losses per Connection Index)
-        iprl = perdas_reais / numero_ligacoes  # m³/connection.day
+        # Calcular IPRL (Índice de Perdas Reais por Ligação)
+        iprl = perdas_reais / numero_ligacoes if numero_ligacoes > 0 else 0  # m³/ligação.dia
         
-        # Calculate IPRI (Unavoidable Real Losses Index)
-        ipri = uarl_m3_dia / numero_ligacoes  # m³/connection.day
+        # Calcular IPRI (Índice de Perdas Reais Inevitáveis)
+        ipri = uarl_m3_dia / numero_ligacoes if numero_ligacoes > 0 else 0  # m³/ligação.dia
         
-        # Finally, calculate IVI
+        # Finalmente, calcular IVI
         ivi = iprl / ipri if ipri > 0 else 0
         
-        # Update system characteristics
+        # Atualizar características do sistema
         self.caracteristicas_sistema['perdas_reais_media'] = perdas_reais
         self.caracteristicas_sistema['iprl'] = iprl
         self.caracteristicas_sistema['ipri'] = ipri
         self.caracteristicas_sistema['ivi'] = ivi
         
-        # Reset fuzzy system to reflect the new IVI
+        # Resetar sistema fuzzy para refletir o novo IVI
         self.sistema_fuzzy = None
         
-        # Prepare detailed results
+        # Preparar resultados detalhados
         resultados = {
             'vazao_minima_noturna': vazao_minima_noturna,
             'pressao_media': pressao_media,
@@ -536,35 +547,53 @@ class DetectorVazamentosColeipa:
         return ivi, resultados
     
     def gerar_dados_baseados_coleipa(self, n_amostras=500):
-        """Generates synthetic data based on Coleipa system characteristics"""
+        """Gera dados sintéticos baseados nas características do sistema Coleipa"""
         df_coleipa = self.criar_dataframe_coleipa()
         
-        # Extract patterns from real data
-        vazao_normal_mean = df_coleipa[df_coleipa['Perdas_Detectadas'] == 0]['Vazao_Media'].mean()
-        vazao_normal_std = df_coleipa[df_coleipa['Perdas_Detectadas'] == 0]['Vazao_Media'].std()
-        pressao_normal_mean = df_coleipa[df_coleipa['Perdas_Detectadas'] == 0]['Pressao_Media'].mean()
-        pressao_normal_std = df_coleipa[df_coleipa['Perdas_Detectadas'] == 0]['Pressao_Media'].std()
+        if df_coleipa.empty:
+            # Se não temos dados, usar valores padrão
+            vazao_normal_mean, vazao_normal_std = 10.0, 1.5
+            pressao_normal_mean, pressao_normal_std = 6.0, 1.0
+            vazao_vazamento_mean, vazao_vazamento_std = 14.0, 1.0
+            pressao_vazamento_mean, pressao_vazamento_std = 3.5, 0.5
+        else:
+            # Extrair padrões dos dados reais
+            dados_normais = df_coleipa[df_coleipa['Perdas_Detectadas'] == 0]
+            dados_vazamento = df_coleipa[df_coleipa['Perdas_Detectadas'] == 1]
+            
+            if not dados_normais.empty:
+                vazao_normal_mean = dados_normais['Vazao_Media'].mean()
+                vazao_normal_std = dados_normais['Vazao_Media'].std()
+                pressao_normal_mean = dados_normais['Pressao_Media'].mean()
+                pressao_normal_std = dados_normais['Pressao_Media'].std()
+            else:
+                vazao_normal_mean, vazao_normal_std = 10.0, 1.5
+                pressao_normal_mean, pressao_normal_std = 6.0, 1.0
+            
+            if not dados_vazamento.empty:
+                vazao_vazamento_mean = dados_vazamento['Vazao_Media'].mean()
+                vazao_vazamento_std = dados_vazamento['Vazao_Media'].std()
+                pressao_vazamento_mean = dados_vazamento['Pressao_Media'].mean()
+                pressao_vazamento_std = dados_vazamento['Pressao_Media'].std()
+            else:
+                vazao_vazamento_mean, vazao_vazamento_std = 14.0, 1.0
+                pressao_vazamento_mean, pressao_vazamento_std = 3.5, 0.5
         
-        vazao_vazamento_mean = df_coleipa[df_coleipa['Perdas_Detectadas'] == 1]['Vazao_Media'].mean()
-        vazao_vazamento_std = df_coleipa[df_coleipa['Perdas_Detectadas'] == 1]['Vazao_Media'].std()
-        pressao_vazamento_mean = df_coleipa[df_coleipa['Perdas_Detectadas'] == 1]['Pressao_Media'].mean()
-        pressao_vazamento_std = df_coleipa[df_coleipa['Perdas_Detectadas'] == 1]['Pressao_Media'].std()
-        
-        # Generate synthetic data based on real patterns
-        n_normal = int(0.55 * n_amostras)  # 55% normal (based on Coleipa data)
+        # Gerar dados sintéticos baseados nos padrões reais
+        n_normal = int(0.55 * n_amostras)  # 55% normal (baseado nos dados de Coleipa)
         n_vazamento = n_amostras - n_normal
         
-        # Normal data
+        # Dados normais
         vazao_normal = np.random.normal(vazao_normal_mean, vazao_normal_std, n_normal)
         pressao_normal = np.random.normal(pressao_normal_mean, pressao_normal_std, n_normal)
-        ivi_normal = np.random.normal(8, 2, n_normal)  # Better IVI for normal operation
+        ivi_normal = np.random.normal(8, 2, n_normal)  # IVI melhor para operação normal
         
-        # Leak data
+        # Dados de vazamento
         vazao_vazamento = np.random.normal(vazao_vazamento_mean, vazao_vazamento_std, n_vazamento)
         pressao_vazamento = np.random.normal(pressao_vazamento_mean, pressao_vazamento_std, n_vazamento)
-        ivi_vazamento = np.random.normal(self.caracteristicas_sistema['ivi'], 3, n_vazamento)  # IVI similar to Coleipa
+        ivi_vazamento = np.random.normal(self.caracteristicas_sistema['ivi'], 3, n_vazamento)  # IVI similar ao de Coleipa
         
-        # Combine data
+        # Combinar dados
         X = np.vstack([
             np.column_stack([vazao_normal, pressao_normal, ivi_normal]),
             np.column_stack([vazao_vazamento, pressao_vazamento, ivi_vazamento])
@@ -575,7 +604,7 @@ class DetectorVazamentosColeipa:
         return X, y, df_coleipa
     
     def treinar_modelo_bayesiano(self, X, y):
-        """Trains Bayesian model with data based on Coleipa"""
+        """Treina modelo Bayesiano com dados baseados em Coleipa"""
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
         
         self.modelo_bayes = GaussianNB()
@@ -583,31 +612,31 @@ class DetectorVazamentosColeipa:
         
         y_pred = self.modelo_bayes.predict(X_test)
         
-        # Calculate confusion matrix and classification report
+        # Calcular matriz de confusão e relatório de classificação
         cm = confusion_matrix(y_test, y_pred)
-        report = classification_report(y_test, y_pred, target_names=['Normal', 'Leak'], output_dict=True)
+        report = classification_report(y_test, y_pred, target_names=['Normal', 'Vazamento'], output_dict=True)
         
         return self.modelo_bayes, cm, report
     
     def visualizar_matriz_confusao(self, cm):
-        """Visualizes confusion matrix"""
+        """Visualiza matriz de confusão"""
         plt.figure(figsize=(8, 6))
         sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', cbar=True,
-                    xticklabels=['Normal', 'Leak'],
-                    yticklabels=['Normal', 'Leak'])
-        plt.title('Confusion Matrix - Coleipa System')
-        plt.xlabel('Predicted')
-        plt.ylabel('Actual')
+                    xticklabels=['Normal', 'Vazamento'],
+                    yticklabels=['Normal', 'Vazamento'])
+        plt.title('Matriz de Confusão - Sistema Coleipa')
+        plt.xlabel('Predito')
+        plt.ylabel('Real')
         plt.tight_layout()
         return plt.gcf()
     
     def avaliar_risco_fuzzy(self, vazao, pressao, ivi):
-        """Evaluates risk using fuzzy system"""
+        """Avalia risco usando sistema fuzzy"""
         if self.sistema_fuzzy is None:
             self.criar_sistema_fuzzy()
         
         try:
-            # Limit values to Coleipa data ranges
+            # Limitar valores às faixas dos dados de Coleipa
             vazao_limitada = max(7, min(vazao, 16))
             pressao_limitada = max(0, min(pressao, 10))
             ivi_limitado = max(1, min(ivi, 25))
@@ -620,20 +649,20 @@ class DetectorVazamentosColeipa:
             
             return self.sistema_fuzzy.output['risco_vazamento']
         except Exception as e:
-            st.error(f"Error in fuzzy evaluation: {e}")
+            st.error(f"Erro na avaliação fuzzy: {e}")
             return 50
     
     def analisar_caso_coleipa(self, vazao=None, pressao=None, ivi=None):
-        """Analyzes a specific case using Coleipa patterns"""
-        # Use typical Coleipa values if not provided
+        """Analisa um caso específico usando padrões de Coleipa"""
+        # Usar valores típicos de Coleipa se não fornecidos
         if vazao is None:
-            vazao = 14.5  # Typical peak flow
+            vazao = 14.5  # Vazão típica de pico
         if pressao is None:
-            pressao = 3.5   # Typical low pressure
+            pressao = 3.5   # Pressão típica baixa
         if ivi is None:
-            ivi = self.caracteristicas_sistema['ivi']   # Real Coleipa IVI
+            ivi = self.caracteristicas_sistema['ivi']   # IVI real de Coleipa
         
-        # Classification based on Coleipa data
+        # Classificação baseada nos dados de Coleipa
         if vazao < 9:
             classe_vazao = "BAIXA (noturna)"
         elif vazao < 14:
@@ -657,7 +686,7 @@ class DetectorVazamentosColeipa:
         else:
             classe_ivi = "MUITO RUIM (Categoria D)"
         
-        # Fuzzy evaluation
+        # Avaliação fuzzy
         risco_fuzzy = self.avaliar_risco_fuzzy(vazao, pressao, ivi)
         
         resultado = {}
@@ -669,7 +698,7 @@ class DetectorVazamentosColeipa:
         resultado['classe_ivi'] = classe_ivi
         resultado['risco_fuzzy'] = risco_fuzzy
         
-        # Bayesian evaluation (if available)
+        # Avaliação Bayesiana (se disponível)
         if self.modelo_bayes is not None:
             dados = [vazao, pressao, ivi]
             prob_bayes = self.modelo_bayes.predict_proba([dados])[0][1]
@@ -695,17 +724,17 @@ class DetectorVazamentosColeipa:
                 resultado['status'] = "RISCO BAIXO (apenas análise fuzzy)"
                 resultado['cor'] = "🟢"
         
-        # Comparison with real Coleipa data
+        # Comparação com dados reais de Coleipa
         resultado['percentual_perdas'] = self.caracteristicas_sistema['percentual_perdas']
         resultado['ivi_real'] = self.caracteristicas_sistema['ivi']
         
         return resultado
     
     def simular_serie_temporal_coleipa(self):
-        """Simulates time series based on real Coleipa patterns"""
+        """Simula série temporal baseada nos padrões reais de Coleipa"""
         df_real = self.criar_dataframe_coleipa()
         
-        # Create expanded time series (3 complete days)
+        # Criar série temporal expandida (3 dias completos)
         tempo = []
         vazao = []
         pressao = []
@@ -715,40 +744,28 @@ class DetectorVazamentosColeipa:
                 timestamp = datetime(2024, 1, 1 + dia, hora, 0)
                 tempo.append(timestamp)
                 
-                # Use real Coleipa data with variation
+                # Usar dados reais de Coleipa com variação
                 idx = hora
-                if idx < len(self.dados_coleipa['vazao_dia1']) and idx < len(self.dados_coleipa['pressao_dia1']) and dia == 0:
-                    v = self.dados_coleipa['vazao_dia1'][idx] + np.random.normal(0, 0.1)
-                    p = self.dados_coleipa['pressao_dia1'][idx] + np.random.normal(0, 0.05)
-                elif idx < len(self.dados_coleipa['vazao_dia2']) and idx < len(self.dados_coleipa['pressao_dia2']) and dia == 1:
-                    v = self.dados_coleipa['vazao_dia2'][idx] + np.random.normal(0, 0.1)
-                    p = self.dados_coleipa['pressao_dia2'][idx] + np.random.normal(0, 0.05)
-                elif idx < len(self.dados_coleipa['vazao_dia3']) and idx < len(self.dados_coleipa['pressao_dia3']) and dia == 2:
-                    v = self.dados_coleipa['vazao_dia3'][idx] + np.random.normal(0, 0.1)
-                    p = self.dados_coleipa['pressao_dia3'][idx] + np.random.normal(0, 0.05)
+                if not df_real.empty and idx < len(df_real):
+                    v = df_real.iloc[idx]['Vazao_Media'] + np.random.normal(0, 0.1)
+                    p = df_real.iloc[idx]['Pressao_Media'] + np.random.normal(0, 0.05)
                 else:
-                    # Use average values if we don't have data for this hour/day
-                    if len(df_real) > 0:
-                        hora_idx = hora % len(df_real)
-                        v = df_real.iloc[hora_idx]['Vazao_Media'] + np.random.normal(0, 0.1)
-                        p = df_real.iloc[hora_idx]['Pressao_Media'] + np.random.normal(0, 0.05)
-                    else:
-                        # Default values if we don't even have average data
-                        v = 10 + np.random.normal(0, 0.1)
-                        p = 5 + np.random.normal(0, 0.05)
+                    # Valores padrão se não temos dados
+                    v = 10 + np.random.normal(0, 0.1)
+                    p = 5 + np.random.normal(0, 0.05)
                 
                 vazao.append(v)
                 pressao.append(p)
         
-        # Simulate leak starting on the second day at 2pm
-        inicio_vazamento = 24 + 14  # corresponding index
+        # Simular vazamento começando no segundo dia às 14h
+        inicio_vazamento = 24 + 14  # índice correspondente
         for i in range(inicio_vazamento, len(vazao)):
-            # Leak progression
+            # Progressão do vazamento
             progresso = min(1.0, (i - inicio_vazamento) / 10)
-            vazao[i] += 3 * progresso  # Gradual increase
-            pressao[i] -= 1.5 * progresso  # Gradual decrease
+            vazao[i] += 3 * progresso  # Aumento gradual
+            pressao[i] -= 1.5 * progresso  # Diminuição gradual
         
-        # Create DataFrame
+        # Criar DataFrame
         df = pd.DataFrame({
             'Tempo': tempo,
             'Vazao': vazao,
@@ -757,7 +774,7 @@ class DetectorVazamentosColeipa:
             'Vazamento_Real': [0] * inicio_vazamento + [1] * (len(tempo) - inicio_vazamento)
         })
         
-        # Calculate detections if the model is trained
+        # Calcular detecções se o modelo estiver treinado
         if self.modelo_bayes is not None:
             deteccoes = []
             for _, row in df.iterrows():
@@ -776,107 +793,107 @@ class DetectorVazamentosColeipa:
         return self.visualizar_serie_temporal_coleipa(df, inicio_vazamento)
     
     def visualizar_serie_temporal_coleipa(self, df, inicio_vazamento):
-        """Visualizes time series based on Coleipa"""
+        """Visualiza série temporal baseada em Coleipa"""
         fig, axes = plt.subplots(3, 1, figsize=(15, 12))
         
-        # Chart 1: Flow Rate
-        axes[0].plot(df['Tempo'], df['Vazao'], 'b-', linewidth=1.5, label='Flow Rate')
-        axes[0].axvline(x=df['Tempo'][inicio_vazamento], color='red', linestyle='--', 
-                       label=f'Leak Start ({df["Tempo"][inicio_vazamento].strftime("%d/%m %H:%M")})')
-        axes[0].set_ylabel('Flow Rate (m³/h)')
-        axes[0].set_title('Time Series - Coleipa System: Flow Rate')
+        # Gráfico 1: Vazão
+        axes[0].plot(df['Tempo'], df['Vazao'], 'b-', linewidth=1.5, label='Vazão')
+        axes[0].axvline(x=df['Tempo'].iloc[inicio_vazamento], color='red', linestyle='--', 
+                       label=f'Início do Vazamento ({df["Tempo"].iloc[inicio_vazamento].strftime("%d/%m %H:%M")})')
+        axes[0].set_ylabel('Vazão (m³/h)')
+        axes[0].set_title('Série Temporal - Sistema Coleipa: Vazão')
         axes[0].legend()
         axes[0].grid(True, alpha=0.3)
         
-        # Chart 2: Pressure
-        axes[1].plot(df['Tempo'], df['Pressao'], 'r-', linewidth=1.5, label='Pressure')
-        axes[1].axhline(y=10, color='orange', linestyle=':', label='NBR Minimum (10 mca)')
-        axes[1].axvline(x=df['Tempo'][inicio_vazamento], color='red', linestyle='--')
-        axes[1].set_ylabel('Pressure (mca)')
-        axes[1].set_title('Time Series - Coleipa System: Pressure')
+        # Gráfico 2: Pressão
+        axes[1].plot(df['Tempo'], df['Pressao'], 'r-', linewidth=1.5, label='Pressão')
+        axes[1].axhline(y=10, color='orange', linestyle=':', label='Mínimo NBR (10 mca)')
+        axes[1].axvline(x=df['Tempo'].iloc[inicio_vazamento], color='red', linestyle='--')
+        axes[1].set_ylabel('Pressão (mca)')
+        axes[1].set_title('Série Temporal - Sistema Coleipa: Pressão')
         axes[1].legend()
         axes[1].grid(True, alpha=0.3)
         
-        # Chart 3: Detections (if available)
+        # Gráfico 3: Detecções (se disponível)
         if 'Prob_Hibrida' in df.columns:
-            axes[2].plot(df['Tempo'], df['Prob_Hibrida'], 'purple', linewidth=2, label='Hybrid Detection')
-            axes[2].plot(df['Tempo'], df['Risco_Fuzzy'], 'green', alpha=0.7, label='Fuzzy Component')
-            axes[2].plot(df['Tempo'], df['Prob_Bayes'], 'orange', alpha=0.7, label='Bayes Component')
-            axes[2].axhline(y=0.5, color='black', linestyle='-.', label='Detection Threshold')
-            axes[2].axvline(x=df['Tempo'][inicio_vazamento], color='red', linestyle='--')
-            axes[2].set_ylabel('Probability')
-            axes[2].set_title('Leak Detection - Hybrid System')
+            axes[2].plot(df['Tempo'], df['Prob_Hibrida'], 'purple', linewidth=2, label='Detecção Híbrida')
+            axes[2].plot(df['Tempo'], df['Risco_Fuzzy'], 'green', alpha=0.7, label='Componente Fuzzy')
+            axes[2].plot(df['Tempo'], df['Prob_Bayes'], 'orange', alpha=0.7, label='Componente Bayes')
+            axes[2].axhline(y=0.5, color='black', linestyle='-.', label='Limiar de Detecção')
+            axes[2].axvline(x=df['Tempo'].iloc[inicio_vazamento], color='red', linestyle='--')
+            axes[2].set_ylabel('Probabilidade')
+            axes[2].set_title('Detecção de Vazamentos - Sistema Híbrido')
             axes[2].legend()
             axes[2].grid(True, alpha=0.3)
         else:
-            axes[2].text(0.5, 0.5, 'Bayesian model not trained\nOnly fuzzy analysis available', 
+            axes[2].text(0.5, 0.5, 'Modelo Bayesiano não treinado\nApenas análise fuzzy disponível', 
                         ha='center', va='center', transform=axes[2].transAxes, fontsize=14)
-            axes[2].set_title('Detection not available')
+            axes[2].set_title('Detecção não disponível')
         
-        axes[2].set_xlabel('Time')
+        axes[2].set_xlabel('Tempo')
         plt.tight_layout()
         return fig, df
     
     def gerar_mapa_calor_ivi(self, resolucao=30):
         """
-        Generates heat maps showing leak risk for different
-        combinations of flow and pressure, with different IVI values based
-        on World Bank classification
+        Gera mapas de calor mostrando risco de vazamento para diferentes
+        combinações de vazão e pressão, com diferentes valores de IVI baseados
+        na classificação do Banco Mundial
         """
-        # Check if fuzzy system is created
+        # Verificar se sistema fuzzy está criado
         if self.sistema_fuzzy is None:
             self.criar_sistema_fuzzy()
         
-        # Use current IVI for "MUITO_RUIM" category
-        current_ivi = self.caracteristicas_sistema['ivi']
+        # IVI atual para categoria "MUITO_RUIM"
+        ivi_atual = self.caracteristicas_sistema['ivi']
         
-        # IVI values based on World Bank classification
-        ivi_valores = [2, 6, 12, 16]  # Representative of categories A, B, C, D
+        # Valores de IVI baseados na classificação do Banco Mundial
+        ivi_valores = [2, 6, 12, 16]  # Representativos das categorias A, B, C, D
         ivi_categorias = ['BOM (2.0)', 'REGULAR (6.0)', 'RUIM (12.0)', f'MUITO RUIM (16.0)']
-        ivi_classificacoes = ['Category A', 'Category B', 'Category C', 'Category D']
+        ivi_classificacoes = ['Categoria A', 'Categoria B', 'Categoria C', 'Categoria D']
         
-        # Values for heat map based on Coleipa data
+        # Valores para mapa de calor baseados nos dados de Coleipa
         vazoes = np.linspace(7, 16, resolucao)
         pressoes = np.linspace(2.5, 8, resolucao)
         
-        # Set up figure with 2x2 subplots for maps + 1 subplot for color bar
+        # Configurar figura com subplots 2x2 para mapas + 1 subplot para barra de cores
         fig = plt.figure(figsize=(18, 16))
         
-        # Create grid: 3 rows, 2 columns
-        # Row 1: 2 upper maps
-        # Row 2: 2 lower maps  
-        # Row 3: centered color bar
+        # Criar grade: 3 linhas, 2 colunas
+        # Linha 1: 2 mapas superiores
+        # Linha 2: 2 mapas inferiores  
+        # Linha 3: barra de cores centralizada
         gs = fig.add_gridspec(3, 2, height_ratios=[1, 1, 0.15], hspace=0.3, wspace=0.2)
         
-        # Create 4 subplots for the maps
+        # Criar 4 subplots para os mapas
         axes = [
-            fig.add_subplot(gs[0, 0]),  # Upper left
-            fig.add_subplot(gs[0, 1]),  # Upper right
-            fig.add_subplot(gs[1, 0]),  # Lower left
-            fig.add_subplot(gs[1, 1])   # Lower right
+            fig.add_subplot(gs[0, 0]),  # Superior esquerdo
+            fig.add_subplot(gs[0, 1]),  # Superior direito
+            fig.add_subplot(gs[1, 0]),  # Inferior esquerdo
+            fig.add_subplot(gs[1, 1])   # Inferior direito
         ]
         
-        # Subplot for color bar (occupying full width)
+        # Subplot para barra de cores (ocupando largura total)
         cbar_ax = fig.add_subplot(gs[2, :])
         
-        # Generate a heat map for each IVI value
-        im = None  # To capture the last image for the color bar
+        # Gerar um mapa de calor para cada valor de IVI
+        im = None  # Para capturar a última imagem para a barra de cores
         for idx, (ax, ivi_valor, categoria, classificacao) in enumerate(zip(axes, ivi_valores, ivi_categorias, ivi_classificacoes)):
             
-            # Create grid for the map
+            # Criar grade para o mapa
             X, Y = np.meshgrid(vazoes, pressoes)
             Z = np.zeros_like(X)
             
-            # Calculate risk for each point on the grid
+            # Calcular risco para cada ponto da grade
             for ii in range(X.shape[0]):
                 for jj in range(X.shape[1]):
                     try:
-                        # Ensure values are within limits
+                        # Garantir que valores estão dentro dos limites
                         vazao_val = max(7, min(X[ii, jj], 16))
                         pressao_val = max(2.5, min(Y[ii, jj], 8))
                         ivi_val = max(1, min(ivi_valor, 25))
                         
-                        # Calculate risk using the fuzzy system
+                        # Calcular risco usando o sistema fuzzy
                         self.sistema_fuzzy.input['vazao'] = vazao_val
                         self.sistema_fuzzy.input['pressao'] = pressao_val
                         self.sistema_fuzzy.input['ivi'] = ivi_val
@@ -886,108 +903,108 @@ class DetectorVazamentosColeipa:
                         Z[ii, jj] = max(0, min(risco, 100))
                         
                     except Exception as e:
-                        # Heuristic based on Coleipa patterns
-                        vazao_norm = (X[ii, jj] - 7) / (16 - 7)  # Normalize 0-1
-                        pressao_norm = 1 - (Y[ii, jj] - 2.5) / (8 - 2.5)  # Invert: low pressure = high risk
+                        # Heurística baseada nos padrões de Coleipa
+                        vazao_norm = (X[ii, jj] - 7) / (16 - 7)  # Normalizar 0-1
+                        pressao_norm = 1 - (Y[ii, jj] - 2.5) / (8 - 2.5)  # Inverter: pressão baixa = risco alto
                         
-                        # Calculate base risk
+                        # Calcular risco base
                         risco_base = (vazao_norm * 0.6 + pressao_norm * 0.4) * 70
                         
-                        # Adjust by IVI
+                        # Ajustar pelo IVI
                         fator_ivi = ivi_valor / 10  # IVI 2=0.2, IVI 18=1.8
                         Z[ii, jj] = min(100, risco_base * fator_ivi + 10)
             
-            # Plot heat map with improved color scale
+            # Plotar mapa de calor com escala de cores melhorada
             im = ax.imshow(Z, cmap='RdYlGn_r', origin='lower', 
                           extent=[vazoes.min(), vazoes.max(), pressoes.min(), pressoes.max()],
                           aspect='auto', vmin=0, vmax=100, interpolation='bilinear')
             
-            # Add smoother contours
+            # Adicionar contornos mais suaves
             try:
-                contour_levels = [20, 40, 60, 80]
-                contours = ax.contour(X, Y, Z, levels=contour_levels, colors='black', alpha=0.4, linewidths=1.5)
-                ax.clabel(contours, inline=True, fontsize=10, fmt='%d%%', 
+                niveis_contorno = [20, 40, 60, 80]
+                contornos = ax.contour(X, Y, Z, levels=niveis_contorno, colors='black', alpha=0.4, linewidths=1.5)
+                ax.clabel(contornos, inline=True, fontsize=10, fmt='%d%%', 
                          bbox=dict(boxstyle="round,pad=0.2", facecolor="white", alpha=0.8))
             except:
                 pass
             
-            # Fuzzy set division lines - more visible
-            # Flow: LOW (7-9), NORMAL (9-14), HIGH (14-16)
+            # Linhas de divisão dos conjuntos fuzzy - mais visíveis
+            # Vazão: BAIXA (7-9), NORMAL (9-14), ALTA (14-16)
             ax.axvline(x=9, color='navy', linestyle=':', alpha=0.8, linewidth=2)
             ax.axvline(x=14, color='navy', linestyle=':', alpha=0.8, linewidth=2)
             
-            # Pressure: LOW (2.5-4.5), NORMAL (4.5-6), HIGH (6-8)
+            # Pressão: BAIXA (2.5-4.5), NORMAL (4.5-6), ALTA (6-8)
             ax.axhline(y=4.5, color='darkgreen', linestyle=':', alpha=0.8, linewidth=2)
             ax.axhline(y=6.0, color='darkgreen', linestyle=':', alpha=0.8, linewidth=2)
             
-            # Fuzzy set labels with reduced size
-            ax.text(8, 7.5, 'FLOW\nLOW', color='navy', fontsize=9, fontweight='bold', 
+            # Rótulos dos conjuntos fuzzy com tamanho reduzido
+            ax.text(8, 7.5, 'VAZÃO\nBAIXA', color='navy', fontsize=9, fontweight='bold', 
                    ha='center', va='center',
                    bbox=dict(boxstyle="round,pad=0.2", facecolor="lightblue", alpha=0.9))
-            ax.text(11.5, 7.5, 'FLOW\nNORMAL', color='navy', fontsize=9, fontweight='bold',
+            ax.text(11.5, 7.5, 'VAZÃO\nNORMAL', color='navy', fontsize=9, fontweight='bold',
                    ha='center', va='center',
                    bbox=dict(boxstyle="round,pad=0.2", facecolor="lightblue", alpha=0.9))
-            ax.text(15, 7.5, 'FLOW\nHIGH', color='navy', fontsize=9, fontweight='bold',
+            ax.text(15, 7.5, 'VAZÃO\nALTA', color='navy', fontsize=9, fontweight='bold',
                    ha='center', va='center',
                    bbox=dict(boxstyle="round,pad=0.2", facecolor="lightblue", alpha=0.9))
             
-            # Pressure labels with reduced size
-            ax.text(15.5, 3.5, 'PRESSURE\nLOW', color='darkgreen', fontsize=9, fontweight='bold', 
+            # Rótulos de pressão com tamanho reduzido
+            ax.text(15.5, 3.5, 'PRESSÃO\nBAIXA', color='darkgreen', fontsize=9, fontweight='bold', 
                    ha='center', va='center', rotation=90,
                    bbox=dict(boxstyle="round,pad=0.2", facecolor="lightgreen", alpha=0.9))
-            ax.text(15.5, 5.2, 'PRESSURE\nNORMAL', color='darkgreen', fontsize=9, fontweight='bold',
+            ax.text(15.5, 5.2, 'PRESSÃO\nNORMAL', color='darkgreen', fontsize=9, fontweight='bold',
                    ha='center', va='center', rotation=90,
                    bbox=dict(boxstyle="round,pad=0.2", facecolor="lightgreen", alpha=0.9))
-            ax.text(15.5, 7, 'PRESSURE\nHIGH', color='darkgreen', fontsize=9, fontweight='bold',
+            ax.text(15.5, 7, 'PRESSÃO\nALTA', color='darkgreen', fontsize=9, fontweight='bold',
                    ha='center', va='center', rotation=90,
                    bbox=dict(boxstyle="round,pad=0.2", facecolor="lightgreen", alpha=0.9))
             
-            # Mark the characteristic point of Coleipa in all charts
-            if idx == 3:  # Last chart (Very Bad IVI) - special highlight
+            # Marcar o ponto característico de Coleipa em todos os gráficos
+            if idx == 3:  # Último gráfico (IVI Muito Ruim) - destaque especial
                 ax.scatter([14.5], [3.5], color='red', s=300, marker='*', 
-                          edgecolors='darkred', linewidth=3, label='Coleipa Point\n(IVI=16.33)', zorder=10)
-                ax.annotate(f'COLEIPA SYSTEM\n(Flow=14.5, Pressure=3.5)\nIVI={current_ivi:.2f} - CRITICAL', 
+                          edgecolors='darkred', linewidth=3, label='Ponto Coleipa\n(IVI=16.33)', zorder=10)
+                ax.annotate(f'SISTEMA COLEIPA\n(Vazão=14.5, Pressão=3.5)\nIVI={ivi_atual:.2f} - CRÍTICO', 
                            xy=(14.5, 3.5), xytext=(11, 2.8),
                            arrowprops=dict(arrowstyle='->', color='red', lw=2),
                            fontsize=9, fontweight='bold', color='red',
                            bbox=dict(boxstyle="round,pad=0.3", facecolor="yellow", alpha=0.9))
                 ax.legend(loc='upper left', fontsize=9)
             else:
-                # Mark the Coleipa point in other charts too
+                # Marcar o ponto de Coleipa nos outros gráficos também
                 ax.scatter([14.5], [3.5], color='red', s=150, marker='*', 
                           edgecolors='darkred', linewidth=2, alpha=0.7, zorder=8)
             
-            # Axis settings
-            ax.set_xlabel('Flow Rate (m³/h)', fontsize=12, fontweight='bold')
-            ax.set_ylabel('Pressure (mca)', fontsize=12, fontweight='bold')
-            ax.set_title(f'Risk Map - IVI {categoria}\n{classificacao}', 
+            # Configurações dos eixos
+            ax.set_xlabel('Vazão (m³/h)', fontsize=12, fontweight='bold')
+            ax.set_ylabel('Pressão (mca)', fontsize=12, fontweight='bold')
+            ax.set_title(f'Mapa de Risco - IVI {categoria}\n{classificacao}', 
                         fontsize=12, fontweight='bold')
             ax.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
             ax.set_xlim(7, 16)
             ax.set_ylim(2.5, 8)
             
-            # Improve ticks
+            # Melhorar ticks
             ax.set_xticks(np.arange(7, 17, 1))
             ax.set_yticks(np.arange(3, 9, 1))
         
-        # Create separate color bar in the dedicated subplot
+        # Criar barra de cores separada no subplot dedicado
         cbar = fig.colorbar(im, cax=cbar_ax, orientation='horizontal')
-        cbar.set_label('Leak Risk (%)', fontsize=14, fontweight='bold')
+        cbar.set_label('Risco de Vazamento (%)', fontsize=14, fontweight='bold')
         cbar.ax.tick_params(labelsize=12)
         
-        # Add custom ticks to color bar
+        # Adicionar ticks personalizados à barra de cores
         cbar.set_ticks([0, 20, 40, 60, 80, 100])
-        cbar.set_ticklabels(['0%\n(Very Low)', '20%\n(Low)', '40%\n(Medium)', 
-                            '60%\n(High)', '80%\n(Very High)', '100%\n(Critical)'])
+        cbar.set_ticklabels(['0%\n(Muito Baixo)', '20%\n(Baixo)', '40%\n(Médio)', 
+                            '60%\n(Alto)', '80%\n(Muito Alto)', '100%\n(Crítico)'])
         
-        # Improved main title
-        fig.suptitle('Risk Map for different IVIs\nWorld Bank Classification - Coleipa System', 
+        # Título principal melhorado
+        fig.suptitle('Mapas de Risco para diferentes IVIs\nClassificação Banco Mundial - Sistema Coleipa', 
                      fontsize=16, fontweight='bold', y=0.96)
         
         return fig, ivi_valores
     
     def gerar_relatorio_coleipa(self):
-        """Generates complete report based on Coleipa system data"""
+        """Gera relatório completo baseado nos dados do sistema Coleipa"""
         relatorio = {
             "caracteristicas": {
                 "localizacao": "Bairro Coleipa, Santa Bárbara do Pará-PA",
@@ -1038,541 +1055,541 @@ class DetectorVazamentosColeipa:
     
     def atualizar_caracteristicas_sistema(self, novas_caracteristicas):
         """
-        Updates system characteristics with new values
+        Atualiza características do sistema com novos valores
         
-        Parameters:
-        novas_caracteristicas (dict): Dictionary with new characteristics
+        Parâmetros:
+        novas_caracteristicas (dict): Dicionário com novas características
         """
         for chave, valor in novas_caracteristicas.items():
             if chave in self.caracteristicas_sistema:
                 self.caracteristicas_sistema[chave] = valor
-                st.success(f"Characteristic '{chave}' updated to: {valor}")
+                st.success(f"Característica '{chave}' atualizada para: {valor}")
             else:
-                st.warning(f"Warning: Characteristic '{chave}' does not exist in the system")
+                st.warning(f"Aviso: Característica '{chave}' não existe no sistema")
         
-        # Reset fuzzy system to force recreation with new parameters
+        # Resetar sistema fuzzy para forçar recriação com novos parâmetros
         self.sistema_fuzzy = None
 
 
-# Streamlit page configuration
+# Configuração da página Streamlit
 st.set_page_config(
-    page_title="Leak Detection System - Coleipa",
+    page_title="Sistema de Detecção de Vazamentos - Coleipa",
     page_icon="💧",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Global variable to store detector instance
+# Variável global para armazenar instância do detector
 @st.cache_resource
-def get_detector(arquivo_uploaded=None):
+def obter_detector(arquivo_uploaded=None):
     return DetectorVazamentosColeipa(arquivo_uploaded)
 
-# Function for downloading files
-def download_button(object_to_download, download_filename, button_text):
+# Função para download de arquivos
+def botao_download(objeto_para_download, nome_arquivo_download, texto_botao):
     """
-    Generates a button that allows downloading an object
+    Gera um botão que permite fazer download de um objeto
     """
-    if isinstance(object_to_download, pd.DataFrame):
-        # If it's a DataFrame
+    if isinstance(objeto_para_download, pd.DataFrame):
+        # Se for um DataFrame
         buffer = io.BytesIO()
         
-        if download_filename.endswith('.csv'):
-            object_to_download.to_csv(buffer, index=False)
-            mime_type = "text/csv"
+        if nome_arquivo_download.endswith('.csv'):
+            objeto_para_download.to_csv(buffer, index=False)
+            tipo_mime = "text/csv"
         else:
-            object_to_download.to_excel(buffer, index=False)
-            mime_type = "application/vnd.ms-excel"
+            objeto_para_download.to_excel(buffer, index=False)
+            tipo_mime = "application/vnd.ms-excel"
         
         buffer.seek(0)
         st.download_button(
-            label=button_text,
+            label=texto_botao,
             data=buffer,
-            file_name=download_filename,
-            mime=mime_type
+            file_name=nome_arquivo_download,
+            mime=tipo_mime
         )
     else:
-        # If it's another type of object
-        st.warning("Object type not supported for download")
+        # Se for outro tipo de objeto
+        st.warning("Tipo de objeto não suportado para download")
 
 
-def app_main():
-    """Main function of the Streamlit application"""
-    st.title("💧 Leak Detection System - SAAP Coleipa")
-    st.markdown("##### Fuzzy-Bayes hybrid system for leak detection in supply networks")
+def aplicacao_principal():
+    """Função principal da aplicação Streamlit"""
+    st.title("💧 Sistema de Detecção de Vazamentos - SAAP Coleipa")
+    st.markdown("##### Sistema híbrido Fuzzy-Bayes para detecção de vazamentos em redes de abastecimento")
     
-    # Sidebar for navigation
-    st.sidebar.title("Navigation")
+    # Barra lateral para navegação
+    st.sidebar.title("Navegação")
     paginas = [
-        "Home",
-        "Monitoring Data",
-        "Fuzzy System",
-        "Bayesian Model",
-        "IVI Heat Maps",
-        "Temporal Simulation",
-        "Case Analysis",
-        "Complete Report",
-        "Settings"
+        "Início",
+        "Dados de Monitoramento",
+        "Sistema Fuzzy",
+        "Modelo Bayesiano",
+        "Mapas de Calor IVI",
+        "Simulação Temporal",
+        "Análise de Caso",
+        "Relatório Completo",
+        "Configurações"
     ]
-    pagina_selecionada = st.sidebar.radio("Select a page:", paginas)
+    pagina_selecionada = st.sidebar.radio("Selecione uma página:", paginas)
     
-    # File upload in sidebar
+    # Upload de arquivo na barra lateral
     st.sidebar.markdown("---")
-    st.sidebar.subheader("Input Data")
-    arquivo_uploaded = st.sidebar.file_uploader("Load monitoring data", type=["xlsx", "csv"])
+    st.sidebar.subheader("Dados de Entrada")
+    arquivo_uploaded = st.sidebar.file_uploader("Carregar dados de monitoramento", type=["xlsx", "csv"])
     
-    # Initialize or get detector
-    detector = get_detector(arquivo_uploaded)
+    # Inicializar ou obter detector
+    detector = obter_detector(arquivo_uploaded)
     
-    # Template for download in sidebar
+    # Modelo para download na barra lateral
     st.sidebar.markdown("---")
-    st.sidebar.subheader("Data Template")
-    formato = st.sidebar.radio("Format:", ["Excel (.xlsx)", "CSV (.csv)"], horizontal=True)
-    nome_arquivo = "template_dados_coleipa." + ("xlsx" if formato == "Excel (.xlsx)" else "csv")
-    df_template = detector.gerar_dados_template()
-    download_button(df_template, nome_arquivo, "⬇️ Download Template")
+    st.sidebar.subheader("Modelo de Dados")
+    formato = st.sidebar.radio("Formato:", ["Excel (.xlsx)", "CSV (.csv)"], horizontal=True)
+    nome_arquivo = "modelo_dados_coleipa." + ("xlsx" if formato == "Excel (.xlsx)" else "csv")
+    df_modelo = detector.gerar_dados_modelo()
+    botao_download(df_modelo, nome_arquivo, "⬇️ Baixar Modelo")
     
-    # Information in sidebar
+    # Informações na barra lateral
     st.sidebar.markdown("---")
-    st.sidebar.subheader("About the System")
+    st.sidebar.subheader("Sobre o Sistema")
     st.sidebar.info(
-        "System based on real data from the SAAP of Coleipa neighborhood, "
-        "Santa Bárbara do Pará - PA. Uses fuzzy logic and Bayesian models "
-        "for leak detection in water supply networks."
+        "Sistema baseado em dados reais do SAAP do bairro Coleipa, "
+        "Santa Bárbara do Pará - PA. Utiliza lógica fuzzy e modelos Bayesianos "
+        "para detecção de vazamentos em redes de abastecimento de água."
     )
     
-    # Main content based on selected page
-    if pagina_selecionada == "Home":
+    # Conteúdo principal baseado na página selecionada
+    if pagina_selecionada == "Início":
         mostrar_pagina_inicio()
     
-    elif pagina_selecionada == "Monitoring Data":
+    elif pagina_selecionada == "Dados de Monitoramento":
         mostrar_pagina_dados(detector)
     
-    elif pagina_selecionada == "Fuzzy System":
+    elif pagina_selecionada == "Sistema Fuzzy":
         mostrar_pagina_fuzzy(detector)
     
-    elif pagina_selecionada == "Bayesian Model":
+    elif pagina_selecionada == "Modelo Bayesiano":
         mostrar_pagina_bayes(detector)
     
-    elif pagina_selecionada == "IVI Heat Maps":
+    elif pagina_selecionada == "Mapas de Calor IVI":
         mostrar_pagina_mapa_calor(detector)
     
-    elif pagina_selecionada == "Temporal Simulation":
+    elif pagina_selecionada == "Simulação Temporal":
         mostrar_pagina_simulacao(detector)
     
-    elif pagina_selecionada == "Case Analysis":
+    elif pagina_selecionada == "Análise de Caso":
         mostrar_pagina_analise_caso(detector)
     
-    elif pagina_selecionada == "Complete Report":
+    elif pagina_selecionada == "Relatório Completo":
         mostrar_pagina_relatorio(detector)
     
-    elif pagina_selecionada == "Settings":
+    elif pagina_selecionada == "Configurações":
         mostrar_pagina_configuracoes(detector)
 
 
 def mostrar_pagina_inicio():
-    """Home page of the application"""
-    st.header("Welcome to the Leak Detection System")
+    """Página inicial da aplicação"""
+    st.header("Bem-vindo ao Sistema de Detecção de Vazamentos")
     
-    # System description
+    # Descrição do sistema
     st.markdown("""
-    This system uses a hybrid approach combining fuzzy logic and Bayesian analysis to 
-    detect leaks in water supply networks based on monitoring data.
+    Este sistema utiliza uma abordagem híbrida combinando lógica fuzzy e análise Bayesiana para 
+    detectar vazamentos em redes de abastecimento de água baseado em dados de monitoramento.
     """)
     
-    # Overview in 3 columns
+    # Visão geral em 3 colunas
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        st.subheader("🔍 Data Analysis")
+        st.subheader("🔍 Análise de Dados")
         st.markdown("""
-        - Visualization of monitoring data
-        - Statistical analysis of flow and pressure
-        - Critical pattern identification
+        - Visualização de dados de monitoramento
+        - Análise estatística de vazão e pressão
+        - Identificação de padrões críticos
         """)
-        st.image("https://via.placeholder.com/300x200?text=Monitoring+Data", use_container_width=True)
     
     with col2:
-        st.subheader("🧠 Hybrid Intelligence")
+        st.subheader("🧠 Inteligência Híbrida")
         st.markdown("""
-        - Fuzzy system based on expert knowledge
-        - Bayesian model for classification
-        - Heat maps for risk analysis
+        - Sistema fuzzy baseado em conhecimento especialista
+        - Modelo Bayesiano para classificação
+        - Mapas de calor para análise de risco
         """)
-        st.image("https://via.placeholder.com/300x200?text=Fuzzy+System", use_container_width=True)
     
     with col3:
-        st.subheader("📊 Results and Reports")
+        st.subheader("📊 Resultados e Relatórios")
         st.markdown("""
-        - Real-time leak simulation
-        - Analysis of specific cases
-        - Detailed reports with recommendations
+        - Simulação de vazamentos em tempo real
+        - Análise de casos específicos
+        - Relatórios detalhados com recomendações
         """)
-        st.image("https://via.placeholder.com/300x200?text=Reports", use_container_width=True)
     
-    # About the Coleipa case
+    # Sobre o caso Coleipa
     st.markdown("---")
-    st.subheader("About the Coleipa System")
+    st.subheader("Sobre o Sistema Coleipa")
     
     col1, col2 = st.columns(2)
     
     with col1:
         st.markdown("""
-        The SAAP (Drinking Water Supply System) of Coleipa neighborhood, located in Santa 
-        Bárbara do Pará, presents typical characteristics of systems with significant losses:
+        O SAAP (Sistema de Abastecimento de Água Potável) do bairro Coleipa, localizado em Santa 
+        Bárbara do Pará, apresenta características típicas de sistemas com perdas significativas:
         
-        - **IVI (Infrastructure Leakage Index)**: {current_ivi:.2f}
-        - **Real losses**: 44.50% of the distributed volume
-        - **Pressures**: Consistently below the recommended minimum (10 mca)
-        - **Characteristic pattern**: High flows with low pressures
+        - **IVI (Índice de Vazamentos da Infraestrutura)**: 16.33
+        - **Perdas reais**: 44.50% do volume distribuído
+        - **Pressões**: Consistentemente abaixo do mínimo recomendado (10 mca)
+        - **Padrão característico**: Vazões altas com pressões baixas
         
-        This system was developed from the detailed analysis of these data and seeks to provide tools
-        for identification, analysis, and management of leaks in similar networks.
+        Este sistema foi desenvolvido a partir da análise detalhada desses dados e busca fornecer ferramentas
+        para identificação, análise e gerenciamento de vazamentos em redes similares.
         """)
     
     with col2:
         st.markdown("""
-        #### System Characteristics
+        #### Características do Sistema
         
-        - **Territorial area**: 319,000 m²
-        - **Population served**: 1,200 inhabitants
-        - **Number of connections**: 300
-        - **Network length**: 3 km
-        - **Branch density**: 100 branches/km
+        - **Área territorial**: 319.000 m²
+        - **População atendida**: 1.200 habitantes
+        - **Número de ligações**: 300
+        - **Extensão da rede**: 3 km
+        - **Densidade de ramais**: 100 ramais/km
         
-        #### World Bank Classification for IVI
-        - **Category A (1-4)**: Efficient system
-        - **Category B (4-8)**: Regular system
-        - **Category C (8-16)**: Bad system
-        - **Category D (>16)**: Very bad system
+        #### Classificação Banco Mundial para IVI
+        - **Categoria A (1-4)**: Sistema eficiente
+        - **Categoria B (4-8)**: Sistema regular
+        - **Categoria C (8-16)**: Sistema ruim
+        - **Categoria D (>16)**: Sistema muito ruim
         """)
     
-    # How to use the system
+    # Como usar o sistema
     st.markdown("---")
-    st.subheader("How to use this system")
+    st.subheader("Como usar este sistema")
     st.markdown("""
-    1. Use the sidebar to navigate between different functionalities
-    2. Load your monitoring data or use the default Coleipa data
-    3. Explore the charts and analyses available in each section
-    4. Generate reports and recommendations for your specific system
+    1. Use a barra lateral para navegar entre as diferentes funcionalidades
+    2. Carregue seus dados de monitoramento ou use os dados padrão de Coleipa
+    3. Explore os gráficos e análises disponíveis em cada seção
+    4. Gere relatórios e recomendações para seu sistema específico
     """)
     
-    # Footer
+    # Rodapé
     st.markdown("---")
-    st.caption("Coleipa Leak Detection System | Based on Fuzzy-Bayes hybrid techniques")
+    st.caption("Sistema de Detecção de Vazamentos Coleipa | Baseado em técnicas híbridas Fuzzy-Bayes")
 
 
 def mostrar_pagina_dados(detector):
-    """Monitoring data visualization page"""
-    st.header("📊 Monitoring Data")
-    st.markdown("Visualization of real monitoring data from the Coleipa System")
+    """Página de visualização de dados de monitoramento"""
+    st.header("📊 Dados de Monitoramento")
+    st.markdown("Visualização dos dados reais de monitoramento do Sistema Coleipa")
     
-    # Button to process data
-    if st.button("View Monitoring Data"):
-        with st.spinner("Processing monitoring data..."):
-            fig, stats, df = detector.visualizar_dados_coleipa()
+    # Botão para processar dados
+    if st.button("Visualizar Dados de Monitoramento"):
+        with st.spinner("Processando dados de monitoramento..."):
+            resultado = detector.visualizar_dados_coleipa()
             
-            # Display charts
-            st.pyplot(fig)
-            
-            # Display statistics in columns
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.subheader("Flow Statistics")
-                st.metric("Minimum flow", f"{stats['vazao_min']:.2f} m³/h", f"Hour {int(stats['vazao_min_hora'])}")
-                st.metric("Maximum flow", f"{stats['vazao_max']:.2f} m³/h", f"Hour {int(stats['vazao_max_hora'])}")
-                st.metric("Min/max ratio", f"{stats['vazao_ratio']:.1f}%")
-            
-            with col2:
-                st.subheader("Pressure Statistics")
-                st.metric("Minimum pressure", f"{stats['pressao_min']:.2f} mca", f"Hour {int(stats['pressao_min_hora'])}")
-                st.metric("Maximum pressure", f"{stats['pressao_max']:.2f} mca", f"Hour {int(stats['pressao_max_hora'])}")
-                st.metric("Hours with pressure < 10 mca", f"{stats['horas_pressao_baixa']} of 24", f"{stats['perc_pressao_baixa']:.1f}%")
-            
-            # Display data table
-            st.subheader("Monitoring Data")
-            st.dataframe(df)
+            if resultado[0] is not None:
+                fig, stats, df = resultado
+                
+                # Exibir gráficos
+                st.pyplot(fig)
+                
+                # Exibir estatísticas em colunas
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.subheader("Estatísticas de Vazão")
+                    st.metric("Vazão mínima", f"{stats['vazao_min']:.2f} m³/h", f"Hora {int(stats['vazao_min_hora'])}")
+                    st.metric("Vazão máxima", f"{stats['vazao_max']:.2f} m³/h", f"Hora {int(stats['vazao_max_hora'])}")
+                    st.metric("Relação min/máx", f"{stats['vazao_ratio']:.1f}%")
+                
+                with col2:
+                    st.subheader("Estatísticas de Pressão")
+                    st.metric("Pressão mínima", f"{stats['pressao_min']:.2f} mca", f"Hora {int(stats['pressao_min_hora'])}")
+                    st.metric("Pressão máxima", f"{stats['pressao_max']:.2f} mca", f"Hora {int(stats['pressao_max_hora'])}")
+                    st.metric("Horas com pressão < 10 mca", f"{stats['horas_pressao_baixa']} de {len(df)}", f"{stats['perc_pressao_baixa']:.1f}%")
+                
+                # Exibir tabela de dados
+                st.subheader("Dados de Monitoramento")
+                st.dataframe(df)
 
 
 def mostrar_pagina_fuzzy(detector):
-    """Fuzzy system page"""
-    st.header("🧠 Fuzzy System")
-    st.markdown("Visualization and configuration of the fuzzy system for leak detection")
+    """Página do sistema fuzzy"""
+    st.header("🧠 Sistema Fuzzy")
+    st.markdown("Visualização e configuração do sistema fuzzy para detecção de vazamentos")
     
-    # Fuzzy sets visualization
-    st.subheader("Fuzzy Sets")
-    if st.button("View Fuzzy Sets"):
-        with st.spinner("Generating fuzzy sets visualization..."):
+    # Visualização dos conjuntos fuzzy
+    st.subheader("Conjuntos Fuzzy")
+    if st.button("Visualizar Conjuntos Fuzzy"):
+        with st.spinner("Gerando visualização dos conjuntos fuzzy..."):
             fig = detector.visualizar_conjuntos_fuzzy()
             st.pyplot(fig)
     
-    # Explanation about fuzzy rules
-    st.subheader("Fuzzy System Rules")
+    # Explicação sobre as regras fuzzy
+    st.subheader("Regras do Sistema Fuzzy")
     st.markdown("""
-    The fuzzy system uses rules based on the analysis of the hydraulic behavior of the Coleipa network.
-    Some of the main rules are:
+    O sistema fuzzy utiliza regras baseadas na análise do comportamento hidráulico da rede de Coleipa.
+    Algumas das principais regras são:
     
-    1. **HIGH Flow + LOW Pressure + VERY_BAD IVI → VERY_HIGH Risk**  
-       *This is the typical leak situation in the Coleipa system*
+    1. **Vazão ALTA + Pressão BAIXA + IVI MUITO_RUIM → Risco MUITO_ALTO**  
+       *Esta é a situação típica de vazamento no sistema Coleipa*
        
-    2. **HIGH Flow + LOW Pressure + REGULAR/BAD IVI → HIGH Risk**  
-       *Strong indication of leak even in systems with better conditions*
+    2. **Vazão ALTA + Pressão BAIXA + IVI REGULAR/RUIM → Risco ALTO**  
+       *Forte indicação de vazamento mesmo em sistemas com melhores condições*
        
-    3. **NORMAL Flow + LOW Pressure + VERY_BAD IVI → HIGH Risk**  
-       *Systems with high IVI have higher risk even with normal flows*
+    3. **Vazão NORMAL + Pressão BAIXA + IVI MUITO_RUIM → Risco ALTO**  
+       *Sistemas com IVI alto têm maior risco mesmo com vazões normais*
        
-    4. **NORMAL Flow + HIGH Pressure + GOOD IVI → VERY_LOW Risk**  
-       *Normal operation in well-maintained systems*
+    4. **Vazão NORMAL + Pressão ALTA + IVI BOM → Risco MUITO_BAIXO**  
+       *Operação normal em sistemas bem mantidos*
     """)
     
-    # Interactive test of the fuzzy system
-    st.subheader("Interactive Test")
-    st.markdown("Adjust the parameters below to test the behavior of the fuzzy system:")
+    # Teste interativo do sistema fuzzy
+    st.subheader("Teste Interativo")
+    st.markdown("Ajuste os parâmetros abaixo para testar o comportamento do sistema fuzzy:")
     
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        vazao_teste = st.slider("Flow (m³/h)", 7.0, 16.0, 14.5, 0.1)
+        vazao_teste = st.slider("Vazão (m³/h)", 7.0, 16.0, 14.5, 0.1)
     
     with col2:
-        pressao_teste = st.slider("Pressure (mca)", 0.0, 10.0, 3.5, 0.1)
+        pressao_teste = st.slider("Pressão (mca)", 0.0, 10.0, 3.5, 0.1)
     
     with col3:
         ivi_teste = st.slider("IVI", 1.0, 25.0, detector.caracteristicas_sistema['ivi'], 0.01)
     
-    if st.button("Calculate Fuzzy Risk"):
-        with st.spinner("Calculating risk..."):
+    if st.button("Calcular Risco Fuzzy"):
+        with st.spinner("Calculando risco..."):
             risco = detector.avaliar_risco_fuzzy(vazao_teste, pressao_teste, ivi_teste)
             
-            # Determine risk category
+            # Determinar categoria de risco
             categoria_risco = ""
             cor_risco = ""
             if risco < 20:
-                categoria_risco = "VERY LOW"
+                categoria_risco = "MUITO BAIXO"
                 cor_risco = "green"
             elif risco < 40:
-                categoria_risco = "LOW"
+                categoria_risco = "BAIXO"
                 cor_risco = "lightgreen"
             elif risco < 60:
-                categoria_risco = "MEDIUM"
+                categoria_risco = "MÉDIO"
                 cor_risco = "orange"
             elif risco < 80:
-                categoria_risco = "HIGH"
+                categoria_risco = "ALTO"
                 cor_risco = "darkorange"
             else:
-                categoria_risco = "VERY HIGH"
+                categoria_risco = "MUITO ALTO"
                 cor_risco = "red"
             
-            # Display result
+            # Exibir resultado
             col1, col2 = st.columns(2)
             
             with col1:
                 st.markdown(f"""
-                #### Evaluation Result
-                - **Flow**: {vazao_teste:.1f} m³/h
-                - **Pressure**: {pressao_teste:.1f} mca
+                #### Resultado da Avaliação
+                - **Vazão**: {vazao_teste:.1f} m³/h
+                - **Pressão**: {pressao_teste:.1f} mca
                 - **IVI**: {ivi_teste:.2f}
                 """)
             
             with col2:
-                st.markdown(f"#### Leak Risk")
+                st.markdown(f"#### Risco de Vazamento")
                 st.markdown(f"<h2 style='color:{cor_risco};'>{risco:.1f}% - {categoria_risco}</h2>", unsafe_allow_html=True)
 
 
 def mostrar_pagina_bayes(detector):
-    """Bayesian model page"""
-    st.header("🔄 Bayesian Model")
-    st.markdown("Training and evaluation of the Naive Bayes model for leak detection")
+    """Página do modelo Bayesiano"""
+    st.header("🔄 Modelo Bayesiano")
+    st.markdown("Treinamento e avaliação do modelo Naive Bayes para detecção de vazamentos")
     
-    # Training parameters
-    st.subheader("Training Parameters")
-    n_amostras = st.slider("Number of synthetic samples", 100, 2000, 500, 100)
+    # Parâmetros de treinamento
+    st.subheader("Parâmetros de Treinamento")
+    n_amostras = st.slider("Número de amostras sintéticas", 100, 2000, 500, 100)
     
-    # Button to train the model
-    if st.button("Train Bayesian Model"):
-        with st.spinner("Generating synthetic data and training model..."):
+    # Botão para treinar o modelo
+    if st.button("Treinar Modelo Bayesiano"):
+        with st.spinner("Gerando dados sintéticos e treinando modelo..."):
             X, y, _ = detector.gerar_dados_baseados_coleipa(n_amostras)
             modelo, cm, report = detector.treinar_modelo_bayesiano(X, y)
             
-            # Display results
+            # Exibir resultados
             col1, col2 = st.columns(2)
             
             with col1:
-                st.subheader("Confusion Matrix")
+                st.subheader("Matriz de Confusão")
                 fig_cm = detector.visualizar_matriz_confusao(cm)
                 st.pyplot(fig_cm)
             
             with col2:
-                st.subheader("Classification Report")
-                # Convert report to DataFrame for better visualization
+                st.subheader("Relatório de Classificação")
+                # Converter relatório para DataFrame para melhor visualização
                 df_report = pd.DataFrame(report).transpose()
                 df_report = df_report.round(3)
                 st.dataframe(df_report)
                 
-                # System characteristics
-                st.markdown("#### Coleipa System Characteristics")
+                # Características do sistema
+                st.markdown("#### Características do Sistema Coleipa")
                 st.markdown(f"""
-                - **Population**: {detector.caracteristicas_sistema['populacao']} inhabitants
-                - **Area**: {detector.caracteristicas_sistema['area_territorial']/1000:.1f} km²
-                - **Real losses**: {detector.caracteristicas_sistema['percentual_perdas']:.1f}%
-                - **IVI**: {detector.caracteristicas_sistema['ivi']:.2f} (Category D - Very Bad)
+                - **População**: {detector.caracteristicas_sistema['populacao']} habitantes
+                - **Área**: {detector.caracteristicas_sistema['area_territorial']/1000:.1f} km²
+                - **Perdas reais**: {detector.caracteristicas_sistema['percentual_perdas']:.1f}%
+                - **IVI**: {detector.caracteristicas_sistema['ivi']:.2f} (Categoria D - Muito Ruim)
                 """)
     
-    # Model explanation
+    # Explicação do modelo
     st.markdown("---")
-    st.subheader("About the Bayesian Model")
+    st.subheader("Sobre o Modelo Bayesiano")
     st.markdown("""
-    The Naive Bayes model is trained with synthetic data generated from the patterns observed in the Coleipa System.
-    It considers three main parameters:
+    O modelo Naive Bayes é treinado com dados sintéticos gerados a partir dos padrões observados no Sistema Coleipa.
+    Ele considera três parâmetros principais:
     
-    1. **Flow** - High values indicate possible leaks
-    2. **Pressure** - Low values indicate possible leaks
-    3. **IVI** - Systems with high IVI have a higher probability of leaks
+    1. **Vazão** - Valores altos indicam possíveis vazamentos
+    2. **Pressão** - Valores baixos indicam possíveis vazamentos
+    3. **IVI** - Sistemas com IVI alto têm maior probabilidade de vazamentos
     
-    The training data are generated based on the following characteristics:
+    Os dados de treinamento são gerados baseados nas seguintes características:
     
-    - **Normal Operation**: 
-      - Lower average flow
-      - Higher average pressure
-      - Lower average IVI (simulating more efficient systems)
+    - **Operação Normal**: 
+      - Vazão média menor
+      - Pressão média maior
+      - IVI médio menor (simulando sistemas mais eficientes)
       
-    - **Leak**: 
-      - Higher average flow
-      - Lower average pressure
-      - Average IVI close to Coleipa's (16.33)
+    - **Vazamento**: 
+      - Vazão média maior
+      - Pressão média menor
+      - IVI médio próximo ao de Coleipa (16.33)
     
-    The classifier is then trained to recognize these patterns and identify leak situations in new data.
+    O classificador é então treinado para reconhecer esses padrões e identificar situações de vazamento em novos dados.
     """)
 
 
 def mostrar_pagina_mapa_calor(detector):
-    """IVI heat maps page"""
-    st.header("🔥 IVI Heat Maps")
-    st.markdown("Risk analysis for different combinations of flow and pressure, considering different IVI values")
+    """Página dos mapas de calor IVI"""
+    st.header("🔥 Mapas de Calor IVI")
+    st.markdown("Análise de risco para diferentes combinações de vazão e pressão, considerando diferentes valores de IVI")
     
-    # Heat map configuration
-    st.subheader("Configuration")
-    resolucao = st.slider("Map resolution", 10, 50, 30, 5, 
-                         help="Higher values generate more detailed maps, but increase processing time")
+    # Configuração do mapa de calor
+    st.subheader("Configuração")
+    resolucao = st.slider("Resolução do mapa", 10, 50, 30, 5, 
+                         help="Valores maiores geram mapas mais detalhados, mas aumentam o tempo de processamento")
     
-    # Button to generate heat maps
-    if st.button("Generate Heat Maps"):
-        with st.spinner("Generating IVI heat maps... This may take a few seconds."):
+    # Botão para gerar mapas de calor
+    if st.button("Gerar Mapas de Calor"):
+        with st.spinner("Gerando mapas de calor IVI... Isso pode levar alguns segundos."):
             fig, ivi_valores = detector.gerar_mapa_calor_ivi(resolucao)
             st.pyplot(fig)
     
-    # Detailed IVI analysis
+    # Análise detalhada do IVI
     st.markdown("---")
-    st.subheader("Detailed IVI Analysis - Coleipa System")
+    st.subheader("Análise Detalhada do IVI - Sistema Coleipa")
     
     st.markdown(f"""
-    ##### 🔍 Calculated IVI: {detector.caracteristicas_sistema['ivi']:.2f}
-    ##### 📊 Classification: Category D (Very Bad)
-    ##### ⚠️ Interpretation: IVI > 16 indicates extremely inefficient use of resources
+    ##### 🔍 IVI Calculado: {detector.caracteristicas_sistema['ivi']:.2f}
+    ##### 📊 Classificação: Categoria D (Muito Ruim)
+    ##### ⚠️ Interpretação: IVI > 16 indica uso extremamente ineficiente de recursos
     """)
     
     col1, col2 = st.columns(2)
     
     with col1:
-        st.markdown("##### 📈 Comparison with other categories:")
+        st.markdown("##### 📈 Comparação com outras categorias:")
         st.markdown("""
-        - 🟢 **Category A (IVI 1-4)**: Efficient system, losses close to unavoidable
-        - 🟡 **Category B (IVI 4-8)**: Regular system, improvements recommended
-        - 🟠 **Category C (IVI 8-16)**: Bad system, urgent actions needed
-        - 🔴 **Category D (IVI >16)**: Very bad system, immediate intervention
+        - 🟢 **Categoria A (IVI 1-4)**: Sistema eficiente, perdas próximas às inevitáveis
+        - 🟡 **Categoria B (IVI 4-8)**: Sistema regular, melhorias recomendadas
+        - 🟠 **Categoria C (IVI 8-16)**: Sistema ruim, ações urgentes necessárias
+        - 🔴 **Categoria D (IVI >16)**: Sistema muito ruim, intervenção imediata
         """)
     
     with col2:
-        st.markdown("##### 🎯 Specific Coleipa analysis (IVI = 16.33):")
+        st.markdown("##### 🎯 Análise específica Coleipa (IVI = 16.33):")
         st.markdown(f"""
-        - Real losses are {detector.caracteristicas_sistema['ivi']:.2f} times higher than unavoidable
-        - Loss reduction potential > 400 L/connection.day
-        - Location on the map: red zone (high risk)
-        - Critical combination: HIGH Flow + LOW Pressure
-        - Maximum priority: immediate leak detection and repair
+        - Perdas reais são {detector.caracteristicas_sistema['ivi']:.2f} vezes maiores que as inevitáveis
+        - Potencial de redução de perdas > 400 L/ligação.dia
+        - Localização no mapa: zona vermelha (risco alto)
+        - Combinação crítica: Vazão ALTA + Pressão BAIXA
+        - Prioridade máxima: detecção e reparo imediato de vazamentos
         """)
     
-    st.markdown("##### 🔧 Visual impact on maps:")
+    st.markdown("##### 🔧 Impacto visual nos mapas:")
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        st.markdown("**GOOD IVI (2.0):**  \nPredominantly green (low risk)")
+        st.markdown("**IVI BOM (2.0):**  \nPredominantemente verde (baixo risco)")
     
     with col2:
-        st.markdown("**REGULAR IVI (6.0):**  \nGreen-yellow (moderate risk)")
+        st.markdown("**IVI REGULAR (6.0):**  \nVerde-amarelo (risco moderado)")
     
     with col3:
-        st.markdown("**BAD IVI (12.0):**  \nYellow-orange (high risk)")
+        st.markdown("**IVI RUIM (12.0):**  \nAmarelo-laranja (risco alto)")
     
     with col4:
-        st.markdown(f"**VERY BAD IVI ({detector.caracteristicas_sistema['ivi']:.2f}):**  \nIntense red (critical risk)")
+        st.markdown(f"**IVI MUITO RUIM ({detector.caracteristicas_sistema['ivi']:.2f}):**  \nVermelho intenso (risco crítico)")
 
 
 def mostrar_pagina_simulacao(detector):
-    """Temporal simulation page"""
-    st.header("⏱️ Temporal Simulation")
-    st.markdown("Time series simulation with leak detection")
+    """Página de simulação temporal"""
+    st.header("⏱️ Simulação Temporal")
+    st.markdown("Simulação de série temporal com detecção de vazamentos")
     
-    # Check if Bayes model is trained
+    # Verificar se modelo Bayes está treinado
     if detector.modelo_bayes is None:
-        st.warning("Bayesian model is not trained. Training model with default parameters...")
-        with st.spinner("Training model..."):
+        st.warning("Modelo Bayesiano não está treinado. Treinando modelo com parâmetros padrão...")
+        with st.spinner("Treinando modelo..."):
             X, y, _ = detector.gerar_dados_baseados_coleipa()
             detector.treinar_modelo_bayesiano(X, y)
     
-    # Button to run simulation
-    if st.button("Run Simulation"):
-        with st.spinner("Simulating time series... This may take a few seconds."):
+    # Botão para executar simulação
+    if st.button("Executar Simulação"):
+        with st.spinner("Simulando série temporal... Isso pode levar alguns segundos."):
             fig, df = detector.simular_serie_temporal_coleipa()
             st.pyplot(fig)
             
-            # Show simulation data
-            with st.expander("View simulation data"):
-                # Format time column for display
-                df_display = df.copy()
-                df_display['Tempo'] = df_display['Tempo'].dt.strftime('%d/%m %H:%M')
+            # Mostrar dados da simulação
+            with st.expander("Ver dados da simulação"):
+                # Formatar coluna de tempo para exibição
+                df_exibicao = df.copy()
+                df_exibicao['Tempo'] = df_exibicao['Tempo'].dt.strftime('%d/%m %H:%M')
                 
-                # Select relevant columns
+                # Selecionar colunas relevantes
                 if 'Prob_Hibrida' in df.columns:
-                    df_display = df_display[['Tempo', 'Vazao', 'Pressao', 'IVI', 'Vazamento_Real', 'Prob_Hibrida']]
+                    df_exibicao = df_exibicao[['Tempo', 'Vazao', 'Pressao', 'IVI', 'Vazamento_Real', 'Prob_Hibrida']]
                 else:
-                    df_display = df_display[['Tempo', 'Vazao', 'Pressao', 'IVI', 'Vazamento_Real']]
+                    df_exibicao = df_exibicao[['Tempo', 'Vazao', 'Pressao', 'IVI', 'Vazamento_Real']]
                 
-                st.dataframe(df_display)
+                st.dataframe(df_exibicao)
     
-    # Simulation explanation
+    # Explicação da simulação
     st.markdown("---")
-    st.subheader("About the Temporal Simulation")
+    st.subheader("Sobre a Simulação Temporal")
     st.markdown("""
-    The temporal simulation represents the system's behavior over 3 complete days, with a simulated leak
-    starting on the second day at 2 PM. Simulation characteristics:
+    A simulação temporal representa o comportamento do sistema ao longo de 3 dias completos, com um vazamento simulado
+    iniciando no segundo dia às 14h. Características da simulação:
     
-    #### Normal Behavior
-    - Flow and pressure follow the patterns observed in the Coleipa system
-    - Small random variations are added to simulate natural fluctuations
-    - Daily cyclic behavior with consumption peaks during the day and valleys during the night
+    #### Comportamento Normal
+    - Vazão e pressão seguem os padrões observados no sistema Coleipa
+    - Pequenas variações aleatórias são adicionadas para simular flutuações naturais
+    - Comportamento cíclico diário com picos de consumo durante o dia e vales durante a noite
     
-    #### Simulated Leak
-    - Starts on the second day at 2 PM
-    - Gradual progression over several hours (simulating growing leak)
-    - Causes simultaneous increase in flow and decrease in pressure
+    #### Vazamento Simulado
+    - Inicia no segundo dia às 14h
+    - Progressão gradual ao longo de várias horas (simulando vazamento em crescimento)
+    - Causa aumento simultâneo de vazão e diminuição de pressão
     
-    #### Detection System
-    - Fuzzy Component: Evaluates risk based on defined rules
-    - Bayes Component: Calculates probability based on learned data
-    - Hybrid System: Combines both approaches (60% fuzzy + 40% bayes)
-    - Detection threshold: Probability > 0.5 indicates leak
+    #### Sistema de Detecção
+    - Componente Fuzzy: Avalia risco baseado nas regras definidas
+    - Componente Bayes: Calcula probabilidade baseada nos dados aprendidos
+    - Sistema Híbrido: Combina ambas as abordagens (60% fuzzy + 40% bayes)
+    - Limiar de detecção: Probabilidade > 0.5 indica vazamento
     """)
     
-    # Leak animation (optional, using HTML code)
-    with st.expander("Conceptual Leak Visualization"):
+    # Animação de vazamento (opcional, usando código HTML)
+    with st.expander("Visualização Conceitual de Vazamento"):
         st.markdown("""
         <div style="width:100%;height:200px;background:linear-gradient(90deg, #3498db 0%, #2980b9 100%);border-radius:10px;position:relative;overflow:hidden;">
             <div style="position:absolute;width:30px;height:30px;background:#e74c3c;border-radius:50%;top:50%;left:70%;transform:translate(-50%,-50%);box-shadow:0 0 20px #e74c3c;">
                 <div style="position:absolute;width:40px;height:40px;border:2px solid #e74c3c;border-radius:50%;top:50%;left:50%;transform:translate(-50%,-50%);animation:pulse 1.5s infinite;"></div>
             </div>
             <div style="position:absolute;width:100%;bottom:0;font-family:sans-serif;color:white;text-align:center;padding:10px;">
-                Conceptual representation of network leak
+                Representação conceitual de vazamento na rede
             </div>
         </div>
         <style>
@@ -1585,416 +1602,416 @@ def mostrar_pagina_simulacao(detector):
 
 
 def mostrar_pagina_analise_caso(detector):
-    """Case analysis page"""
-    st.header("🔬 Specific Case Analysis")
-    st.markdown("Analyze a specific operation case based on the provided parameters")
+    """Página de análise de caso"""
+    st.header("🔬 Análise de Caso Específico")
+    st.markdown("Analise um caso específico de operação baseado nos parâmetros fornecidos")
     
-    # Check if Bayes model is trained
+    # Verificar se modelo Bayes está treinado
     if detector.modelo_bayes is None:
-        st.warning("Bayesian model is not trained. Some results will be limited to fuzzy analysis only.")
-        usar_bayes = st.checkbox("Train Bayesian model now", value=True)
+        st.warning("Modelo Bayesiano não está treinado. Alguns resultados serão limitados apenas à análise fuzzy.")
+        usar_bayes = st.checkbox("Treinar modelo Bayesiano agora", value=True)
         if usar_bayes:
-            with st.spinner("Training model..."):
+            with st.spinner("Treinando modelo..."):
                 X, y, _ = detector.gerar_dados_baseados_coleipa()
                 detector.treinar_modelo_bayesiano(X, y)
     
-    # Form for data input
-    st.subheader("System Parameters")
+    # Formulário para entrada de dados
+    st.subheader("Parâmetros do Sistema")
     
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        vazao = st.number_input("Flow (m³/h)", min_value=7.0, max_value=16.0, value=14.5, step=0.1,
-                              help="Typical value for Coleipa: 14.5 m³/h")
+        vazao = st.number_input("Vazão (m³/h)", min_value=7.0, max_value=16.0, value=14.5, step=0.1,
+                              help="Valor típico para Coleipa: 14.5 m³/h")
     
     with col2:
-        pressao = st.number_input("Pressure (mca)", min_value=0.0, max_value=10.0, value=3.5, step=0.1,
-                                help="Typical value for Coleipa: 3.5 mca")
+        pressao = st.number_input("Pressão (mca)", min_value=0.0, max_value=10.0, value=3.5, step=0.1,
+                                help="Valor típico para Coleipa: 3.5 mca")
     
     with col3:
         ivi = st.number_input("IVI", min_value=1.0, max_value=25.0, value=detector.caracteristicas_sistema['ivi'], step=0.01,
-                            help="Coleipa IVI: 16.33 (Category D)")
+                            help="IVI Coleipa: 16.33 (Categoria D)")
     
-    # Button to run analysis
-    if st.button("Analyze Case"):
-        with st.spinner("Analyzing case..."):
+    # Botão para executar análise
+    if st.button("Analisar Caso"):
+        with st.spinner("Analisando caso..."):
             resultado = detector.analisar_caso_coleipa(vazao, pressao, ivi)
             
-            # Display results in columns
+            # Exibir resultados em colunas
             col1, col2 = st.columns(2)
             
             with col1:
-                st.subheader("Classification")
+                st.subheader("Classificação")
                 st.markdown(f"""
-                - **Flow**: {resultado['vazao']:.1f} m³/h → {resultado['classe_vazao']}
-                - **Pressure**: {resultado['pressao']:.1f} mca → {resultado['classe_pressao']}
+                - **Vazão**: {resultado['vazao']:.1f} m³/h → {resultado['classe_vazao']}
+                - **Pressão**: {resultado['pressao']:.1f} mca → {resultado['classe_pressao']}
                 - **IVI**: {resultado['ivi']:.2f} → {resultado['classe_ivi']}
                 """)
                 
-                # Analysis result
-                st.subheader("Analysis Result")
+                # Resultado da análise
+                st.subheader("Resultado da Análise")
                 st.markdown(f"### {resultado['cor']} {resultado['status']}")
             
             with col2:
-                st.subheader("Numerical Results")
+                st.subheader("Resultados Numéricos")
                 
-                # Show different analysis components
+                # Mostrar diferentes componentes da análise
                 if 'prob_bayes' in resultado:
                     col_a, col_b, col_c = st.columns(3)
                     with col_a:
-                        st.metric("Fuzzy Risk", f"{resultado['risco_fuzzy']:.1f}%")
+                        st.metric("Risco Fuzzy", f"{resultado['risco_fuzzy']:.1f}%")
                     with col_b:
-                        st.metric("Bayesian Prob.", f"{resultado['prob_bayes']:.3f}")
+                        st.metric("Prob. Bayesiana", f"{resultado['prob_bayes']:.3f}")
                     with col_c:
-                        st.metric("Hybrid Prob.", f"{resultado['prob_hibrida']:.3f}")
+                        st.metric("Prob. Híbrida", f"{resultado['prob_hibrida']:.3f}")
                 else:
-                    st.metric("Fuzzy Risk", f"{resultado['risco_fuzzy']:.1f}%")
-                    st.info("Bayesian model not available - fuzzy analysis only")
+                    st.metric("Risco Fuzzy", f"{resultado['risco_fuzzy']:.1f}%")
+                    st.info("Modelo Bayesiano não disponível - apenas análise fuzzy")
                 
-                # Comparison with Coleipa
-                st.subheader("Comparison with Coleipa System")
+                # Comparação com Coleipa
+                st.subheader("Comparação com Sistema Coleipa")
                 st.markdown(f"""
-                - **Real losses**: {resultado['percentual_perdas']:.1f}%
-                - **Real IVI**: {resultado['ivi_real']:.2f} (Category D - Very Bad)
-                - **Recommended priority**: Leak detection
+                - **Perdas reais**: {resultado['percentual_perdas']:.1f}%
+                - **IVI real**: {resultado['ivi_real']:.2f} (Categoria D - Muito Ruim)
+                - **Prioridade recomendada**: Detecção de vazamentos
                 """)
     
-    # Explanation about case analysis
+    # Explicação sobre análise de caso
     st.markdown("---")
-    st.subheader("How to interpret the results")
+    st.subheader("Como interpretar os resultados")
     
     st.markdown("""
-    #### Flow Classification
-    - **LOW (night)**: Values below 9 m³/h, typical of night periods
-    - **NORMAL (transition)**: Values between 9-14 m³/h, compatible with normal operation
-    - **HIGH (peak/leak)**: Values above 14 m³/h, indicate consumption peak or leak
+    #### Classificação de Vazão
+    - **BAIXA (noturna)**: Valores abaixo de 9 m³/h, típicos de períodos noturnos
+    - **NORMAL (transição)**: Valores entre 9-14 m³/h, compatíveis com operação normal
+    - **ALTA (pico/vazamento)**: Valores acima de 14 m³/h, indicam pico de consumo ou vazamento
     
-    #### Pressure Classification
-    - **LOW (problem)**: Values below 5 mca, indicate network problems
-    - **MEDIUM (operational)**: Values between 5-8 mca, within the observed operational range
-    - **HIGH (good)**: Values above 8 mca, close to NBR recommendation
+    #### Classificação de Pressão
+    - **BAIXA (problema)**: Valores abaixo de 5 mca, indicam problemas na rede
+    - **MÉDIA (operacional)**: Valores entre 5-8 mca, dentro da faixa operacional observada
+    - **ALTA (boa)**: Valores acima de 8 mca, próximos à recomendação NBR
     
-    #### IVI Classification
-    - **GOOD (Category A)**: IVI between 1-4, efficient system
-    - **REGULAR (Category B)**: IVI between 4-8, regular system
-    - **BAD (Category C)**: IVI between 8-16, bad system
-    - **VERY BAD (Category D)**: IVI above 16, very bad system
+    #### Classificação de IVI
+    - **BOM (Categoria A)**: IVI entre 1-4, sistema eficiente
+    - **REGULAR (Categoria B)**: IVI entre 4-8, sistema regular
+    - **RUIM (Categoria C)**: IVI entre 8-16, sistema ruim
+    - **MUITO RUIM (Categoria D)**: IVI acima de 16, sistema muito ruim
     
-    #### Status Interpretation
-    - 🟢 **NORMAL OPERATION**: Low probability of leaks
-    - 🟡 **HIGH RISK - MONITOR**: Attention situation, monitoring recommended
-    - 🔴 **LEAK DETECTED**: High probability of leak, intervention needed
+    #### Interpretação do Status
+    - 🟢 **OPERAÇÃO NORMAL**: Baixa probabilidade de vazamentos
+    - 🟡 **RISCO ELEVADO - MONITORAR**: Situação de atenção, monitoramento recomendado
+    - 🔴 **VAZAMENTO DETECTADO**: Alta probabilidade de vazamento, intervenção necessária
     """)
 
 
 def mostrar_pagina_relatorio(detector):
-    """Complete report page"""
-    st.header("📝 Complete Report")
-    st.markdown("Detailed report based on Coleipa system data")
+    """Página de relatório completo"""
+    st.header("📝 Relatório Completo")
+    st.markdown("Relatório detalhado baseado nos dados do sistema Coleipa")
     
-    # Button to generate report
-    if st.button("Generate Complete Report"):
-        with st.spinner("Generating report..."):
+    # Botão para gerar relatório
+    if st.button("Gerar Relatório Completo"):
+        with st.spinner("Gerando relatório..."):
             relatorio = detector.gerar_relatorio_coleipa()
             
-            # Report header
+            # Cabeçalho do relatório
             st.markdown("---")
-            st.subheader("ANALYSIS REPORT - COLEIPA SYSTEM")
+            st.subheader("RELATÓRIO DE ANÁLISE - SISTEMA COLEIPA")
             st.markdown("---")
             
-            # 1. System Characteristics
-            st.subheader("1. SYSTEM CHARACTERISTICS")
+            # 1. Características do Sistema
+            st.subheader("1. CARACTERÍSTICAS DO SISTEMA")
             st.markdown(f"""
-            - **Location**: {relatorio['caracteristicas']['localizacao']}
-            - **Territorial area**: {relatorio['caracteristicas']['area']:.1f} km²
-            - **Population served**: {relatorio['caracteristicas']['populacao']} inhabitants
-            - **Number of connections**: {relatorio['caracteristicas']['ligacoes']}
-            - **Network length**: {relatorio['caracteristicas']['rede']} km
-            - **Branch density**: {relatorio['caracteristicas']['densidade_ramais']} branches/km
+            - **Localização**: {relatorio['caracteristicas']['localizacao']}
+            - **Área territorial**: {relatorio['caracteristicas']['area']:.1f} km²
+            - **População atendida**: {relatorio['caracteristicas']['populacao']} habitantes
+            - **Número de ligações**: {relatorio['caracteristicas']['ligacoes']}
+            - **Extensão da rede**: {relatorio['caracteristicas']['rede']} km
+            - **Densidade de ramais**: {relatorio['caracteristicas']['densidade_ramais']} ramais/km
             """)
             
-            # 2. Monitoring Results
-            st.subheader("2. MONITORING RESULTS (72 hours)")
+            # 2. Resultados do Monitoramento
+            st.subheader("2. RESULTADOS DO MONITORAMENTO (72 horas)")
             col1, col2 = st.columns(2)
             
             with col1:
-                st.metric("Average demanded volume", f"{relatorio['monitoramento']['volume_demandado']:.1f} m³/day")
-                st.metric("Average consumed volume", f"{relatorio['monitoramento']['volume_consumido']:.1f} m³/day")
+                st.metric("Volume médio demandado", f"{relatorio['monitoramento']['volume_demandado']:.1f} m³/dia")
+                st.metric("Volume médio consumido", f"{relatorio['monitoramento']['volume_consumido']:.1f} m³/dia")
             
             with col2:
-                st.metric("Average real losses", f"{relatorio['monitoramento']['perdas_reais']:.1f} m³/day")
-                st.metric("Loss percentage", f"{relatorio['monitoramento']['percentual_perdas']:.1f}%")
+                st.metric("Perdas reais médias", f"{relatorio['monitoramento']['perdas_reais']:.1f} m³/dia")
+                st.metric("Percentual de perdas", f"{relatorio['monitoramento']['percentual_perdas']:.1f}%")
             
-            # 3. Performance Indicators
-            st.subheader("3. PERFORMANCE INDICATORS")
+            # 3. Indicadores de Desempenho
+            st.subheader("3. INDICADORES DE DESEMPENHO")
             col1, col2, col3 = st.columns(3)
             
             with col1:
-                st.metric("IPRL", f"{relatorio['indicadores']['iprl']} m³/conn.day", "Real Losses per Connection")
+                st.metric("IPRL", f"{relatorio['indicadores']['iprl']:.3f} m³/lig.dia", "Perdas Reais por Ligação")
             
             with col2:
-                st.metric("IPRI", f"{relatorio['indicadores']['ipri']} m³/conn.day", "Unavoidable Real Losses")
+                st.metric("IPRI", f"{relatorio['indicadores']['ipri']:.3f} m³/lig.dia", "Perdas Reais Inevitáveis")
             
             with col3:
-                st.metric("IVI", f"{relatorio['indicadores']['ivi']}", "Infrastructure Leakage Index")
+                st.metric("IVI", f"{relatorio['indicadores']['ivi']:.2f}", "Índice de Vazamentos da Infraestrutura")
             
-            # 4. Classification
-            st.subheader("4. CLASSIFICATION (World Bank)")
+            # 4. Classificação
+            st.subheader("4. CLASSIFICAÇÃO (Banco Mundial)")
             st.markdown(f"""
-            - **Category**: {relatorio['classificacao']['categoria']}
-            - **Interpretation**: {relatorio['classificacao']['interpretacao']}
-            - **Recommendation**: {relatorio['classificacao']['recomendacao']}
+            - **Categoria**: {relatorio['classificacao']['categoria']}
+            - **Interpretação**: {relatorio['classificacao']['interpretacao']}
+            - **Recomendação**: {relatorio['classificacao']['recomendacao']}
             """)
             
-           # 5. NPR Methodology - Action Prioritization
-            st.subheader("5. NPR METHODOLOGY - ACTION PRIORITIZATION")
+            # 5. Metodologia NPR - Priorização de Ações
+            st.subheader("5. METODOLOGIA NPR - PRIORIZAÇÃO DE AÇÕES")
             
-            # Create priorities table
+            # Criar tabela de prioridades
             df_prioridades = pd.DataFrame(relatorio['prioridades'])
-            df_prioridades.columns = ["Order", "Action", "Result"]
+            df_prioridades.columns = ["Ordem", "Ação", "Resultado"]
             
-            # Bar chart for priorities
+            # Gráfico de barras para prioridades
             fig, ax = plt.subplots(figsize=(10, 5))
-            bars = ax.barh(
+            barras = ax.barh(
                 [p['acao'] for p in relatorio['prioridades']], 
                 [p['resultado'] for p in relatorio['prioridades']],
                 color=['#3498db', '#2980b9', '#1f618d', '#154360']
             )
-            ax.set_xlabel('NPR Result')
-            ax.set_title('Action Prioritization (NPR Methodology)')
+            ax.set_xlabel('Resultado NPR')
+            ax.set_title('Priorização de Ações (Metodologia NPR)')
             
-            # Add values on bars
-            for bar in bars:
-                width = bar.get_width()
-                label_x_pos = width + 1
-                ax.text(label_x_pos, bar.get_y() + bar.get_height()/2, f'{width}', 
+            # Adicionar valores nas barras
+            for barra in barras:
+                largura = barra.get_width()
+                pos_x_rotulo = largura + 1
+                ax.text(pos_x_rotulo, barra.get_y() + barra.get_height()/2, f'{largura}', 
                        va='center', fontweight='bold')
             
             st.pyplot(fig)
             st.dataframe(df_prioridades)
             
-            # 6. Identified Problems
-            st.subheader("6. IDENTIFIED PROBLEMS")
+            # 6. Problemas Identificados
+            st.subheader("6. PROBLEMAS IDENTIFICADOS")
             for i, problema in enumerate(relatorio['problemas'], 1):
                 st.markdown(f"- {problema}")
             
-            # 7. Recommendations
-            st.subheader("7. RECOMMENDATIONS")
+            # 7. Recomendações
+            st.subheader("7. RECOMENDAÇÕES")
             for i, recomendacao in enumerate(relatorio['recomendacoes'], 1):
-                st.markdown(f"- **Recommendation {i}**: {recomendacao}")
+                st.markdown(f"- **Recomendação {i}**: {recomendacao}")
             
-            # 8. Economic Impact Analysis
-            st.subheader("8. ECONOMIC IMPACT ANALYSIS")
+            # 8. Análise de Impacto Econômico
+            st.subheader("8. ANÁLISE DE IMPACTO ECONÔMICO")
             
-            # Estimate annual water loss
-            perda_anual_m3 = relatorio['monitoramento']['perdas_reais'] * 365  # m³/year
+            # Estimar perda anual de água
+            perda_anual_m3 = relatorio['monitoramento']['perdas_reais'] * 365  # m³/ano
             
-            # Reference values for costs
-            custo_agua_tratada = 1.50  # R$/m³ (average value for treated water)
-            custo_energia = 0.80  # R$/m³ (energy cost for pumping)
-            custo_manutencao = 0.50  # R$/m³ (maintenance cost related to losses)
+            # Valores de referência para custos
+            custo_agua_tratada = 1.50  # R$/m³ (valor médio para água tratada)
+            custo_energia = 0.80  # R$/m³ (custo de energia para bombeamento)
+            custo_manutencao = 0.50  # R$/m³ (custo de manutenção relacionado às perdas)
             
-            # Cost calculation
+            # Cálculo de custos
             custo_anual_agua = perda_anual_m3 * custo_agua_tratada
             custo_anual_energia = perda_anual_m3 * custo_energia
             custo_anual_manutencao = perda_anual_m3 * custo_manutencao
             custo_anual_total = custo_anual_agua + custo_anual_energia + custo_anual_manutencao
             
-            # Estimated savings with IVI reduction
+            # Economia estimada com redução do IVI
             ivi_atual = relatorio['indicadores']['ivi']
-            ivi_alvo = 8.0  # Target: reduction to Category B
+            ivi_alvo = 8.0  # Meta: redução para Categoria B
             reducao_percentual = max(0, (ivi_atual - ivi_alvo) / ivi_atual * 100)
             economia_potencial = custo_anual_total * (reducao_percentual / 100)
             
-            # Display economic results in columns
+            # Exibir resultados econômicos em colunas
             col1, col2 = st.columns(2)
             
             with col1:
-                st.metric("Estimated annual loss", f"{perda_anual_m3:.0f} m³/year")
-                st.metric("Annual cost of treated water", f"R$ {custo_anual_agua:.2f}")
-                st.metric("Annual energy cost", f"R$ {custo_anual_energia:.2f}")
-                st.metric("Annual maintenance cost", f"R$ {custo_anual_manutencao:.2f}")
+                st.metric("Perda anual estimada", f"{perda_anual_m3:.0f} m³/ano")
+                st.metric("Custo anual água tratada", f"R$ {custo_anual_agua:.2f}")
+                st.metric("Custo anual energia", f"R$ {custo_anual_energia:.2f}")
+                st.metric("Custo anual manutenção", f"R$ {custo_anual_manutencao:.2f}")
             
             with col2:
-                st.metric("Total annual cost", f"R$ {custo_anual_total:.2f}")
-                st.metric("IVI reduction target", f"{ivi_atual:.2f} → {ivi_alvo:.2f} ({reducao_percentual:.1f}%)")
-                st.metric("Potential annual savings", f"R$ {economia_potencial:.2f}")
+                st.metric("Custo anual total", f"R$ {custo_anual_total:.2f}")
+                st.metric("Meta de redução IVI", f"{ivi_atual:.2f} → {ivi_alvo:.2f} ({reducao_percentual:.1f}%)")
+                st.metric("Economia potencial anual", f"R$ {economia_potencial:.2f}")
                 payback_anos = 100000 / economia_potencial if economia_potencial > 0 else float('inf')
-                st.metric("Estimated payback (R$ 100,000 investment)", f"{payback_anos:.1f} years")
+                st.metric("Payback estimado (investimento R$ 100.000)", f"{payback_anos:.1f} anos")
             
-            # Cost composition chart
+            # Gráfico de composição dos custos
             fig_custos, ax_custos = plt.subplots(figsize=(10, 6))
             custos = [custo_anual_agua, custo_anual_energia, custo_anual_manutencao]
-            labels = ['Treated Water', 'Energy', 'Maintenance']
-            colors = ['#3498db', '#2ecc71', '#e74c3c']
+            rotulos = ['Água Tratada', 'Energia', 'Manutenção']
+            cores = ['#3498db', '#2ecc71', '#e74c3c']
             
-            ax_custos.pie(custos, labels=labels, autopct='%1.1f%%', startangle=90, colors=colors,
+            ax_custos.pie(custos, labels=rotulos, autopct='%1.1f%%', startangle=90, colors=cores,
                          wedgeprops=dict(width=0.5, edgecolor='w'))
             ax_custos.axis('equal')
-            ax_custos.set_title('Composition of Costs Related to Losses')
+            ax_custos.set_title('Composição dos Custos Relacionados às Perdas')
             
             st.pyplot(fig_custos)
             
-            # 9. Action Plan
-            st.subheader("9. ACTION PLAN")
+            # 9. Plano de Ação
+            st.subheader("9. PLANO DE AÇÃO")
             
-            # Action plan table
+            # Tabela do plano de ação
             plano_acao = [
                 {
-                    "Etapa": "Short Term (0-6 months)",
-                    "Ação": "Search for non-visible leaks in the network",
-                    "Custo Estimado": "R$ 25,000.00",
-                    "Impacto Esperado": "20% reduction in losses"
+                    "Etapa": "Curto Prazo (0-6 meses)",
+                    "Ação": "Pesquisa de vazamentos não visíveis na rede",
+                    "Custo Estimado": "R$ 25.000,00",
+                    "Impacto Esperado": "20% redução nas perdas"
                 },
                 {
-                    "Etapa": "Short Term (0-6 months)",
-                    "Ação": "Improve repair time for visible leaks",
-                    "Custo Estimado": "R$ 10,000.00",
-                    "Impacto Esperado": "5% reduction in losses"
+                    "Etapa": "Curto Prazo (0-6 meses)",
+                    "Ação": "Melhoria do tempo de reparo de vazamentos visíveis",
+                    "Custo Estimado": "R$ 10.000,00",
+                    "Impacto Esperado": "5% redução nas perdas"
                 },
                 {
-                    "Etapa": "Medium Term (6-18 months)",
-                    "Ação": "Installation of PRVs at critical points",
-                    "Custo Estimado": "R$ 40,000.00",
-                    "Impacto Esperado": "15% reduction in losses"
+                    "Etapa": "Médio Prazo (6-18 meses)",
+                    "Ação": "Instalação de VRPs em pontos críticos",
+                    "Custo Estimado": "R$ 40.000,00",
+                    "Impacto Esperado": "15% redução nas perdas"
                 },
                 {
-                    "Etapa": "Medium Term (6-18 months)",
-                    "Ação": "Sectorization of the distribution network",
-                    "Custo Estimado": "R$ 60,000.00",
-                    "Impacto Esperado": "20% reduction in losses"
+                    "Etapa": "Médio Prazo (6-18 meses)",
+                    "Ação": "Setorização da rede de distribuição",
+                    "Custo Estimado": "R$ 60.000,00",
+                    "Impacto Esperado": "20% redução nas perdas"
                 },
                 {
-                    "Etapa": "Long Term (18-36 months)",
-                    "Ação": "Replacement of critical network sections",
-                    "Custo Estimado": "R$ 120,000.00",
-                    "Impacto Esperado": "25% reduction in losses"
+                    "Etapa": "Longo Prazo (18-36 meses)",
+                    "Ação": "Substituição de trechos críticos da rede",
+                    "Custo Estimado": "R$ 120.000,00",
+                    "Impacto Esperado": "25% redução nas perdas"
                 }
             ]
             
             df_plano = pd.DataFrame(plano_acao)
             st.dataframe(df_plano, use_container_width=True)
             
-            # Gantt chart for schedule
+            # Gráfico de Gantt para cronograma
             fig_gantt, ax_gantt = plt.subplots(figsize=(12, 5))
             
-            # Gantt data
-            etapas = ['Leak detection', 'Improve repair time', 'Install PRVs', 
-                    'Network sectorization', 'Replace critical sections']
+            # Dados do Gantt
+            etapas = ['Detecção vazamentos', 'Melhorar tempo reparo', 'Instalar VRPs', 
+                    'Setorização rede', 'Substituir trechos críticos']
             inicio = [0, 0, 6, 8, 18]
             duracao = [6, 3, 6, 10, 18]
             cores = ['#3498db', '#2ecc71', '#f39c12', '#9b59b6', '#e74c3c']
             
-            # Plot bars
+            # Plotar barras
             for i, (etapa, start, dur, cor) in enumerate(zip(etapas, inicio, duracao, cores)):
                 ax_gantt.barh(i, dur, left=start, color=cor, alpha=0.8)
-                # Add text on bar
+                # Adicionar texto na barra
                 ax_gantt.text(start + dur/2, i, etapa, ha='center', va='center', fontsize=9, fontweight='bold')
             
-            # Axis settings
+            # Configurações dos eixos
             ax_gantt.set_yticks([])
-            ax_gantt.set_xlabel('Months')
-            ax_gantt.set_title('Implementation Schedule')
+            ax_gantt.set_xlabel('Meses')
+            ax_gantt.set_title('Cronograma de Implementação')
             ax_gantt.grid(axis='x', alpha=0.3)
             ax_gantt.set_axisbelow(True)
             
-            # Add time markers
+            # Adicionar marcadores de tempo
             for i in range(0, 37, 6):
                 ax_gantt.axvline(x=i, color='gray', linestyle='--', alpha=0.5)
                 ax_gantt.text(i, -0.5, f'{i}m', ha='center', va='top')
             
             st.pyplot(fig_gantt)
             
-            # 10. Final Considerations
-            st.subheader("10. FINAL CONSIDERATIONS")
+            # 10. Considerações Finais
+            st.subheader("10. CONSIDERAÇÕES FINAIS")
             st.markdown("""
-            The detailed analysis of the Drinking Water Supply System (SAAP) of Coleipa neighborhood reveals
-            a critical condition regarding water losses, with classification D (very bad) according to World Bank criteria.
-            This condition results in significant waste of water and financial resources.
+            A análise detalhada do Sistema de Abastecimento de Água Potável (SAAP) do bairro Coleipa revela
+            uma condição crítica em relação às perdas de água, com classificação D (muito ruim) segundo critérios do Banco Mundial.
+            Esta condição resulta em desperdício significativo de água e recursos financeiros.
             
-            The implementation of the actions recommended in this report has the potential to:
+            A implementação das ações recomendadas neste relatório tem potencial para:
             
-            1. **Reduce IVI** from {:.2f} to values below 8 (Category B)
-            2. **Save approximately R$ {:.2f} per year** in operational costs
-            3. **Postpone investments** in production system expansion
-            4. **Improve pressure and continuity** of supply for users
+            1. **Reduzir o IVI** de {:.2f} para valores abaixo de 8 (Categoria B)
+            2. **Economizar aproximadamente R$ {:.2f} por ano** em custos operacionais
+            3. **Postergar investimentos** em ampliação do sistema de produção
+            4. **Melhorar a pressão e continuidade** do abastecimento para os usuários
             
-            It is strongly recommended to immediately adopt short-term measures, with special focus on detecting
-            non-visible leaks, which constitutes the action with the greatest immediate impact according to the NPR Methodology.
+            Recomenda-se fortemente a adoção imediata das medidas de curto prazo, com foco especial na detecção
+            de vazamentos não visíveis, que constitui a ação de maior impacto imediato segundo a Metodologia NPR.
             
-            **Important note:** The success of the loss reduction program is directly linked to
-            management commitment and allocation of necessary resources for its implementation.
+            **Nota importante:** O sucesso do programa de redução de perdas está diretamente vinculado ao
+            comprometimento da gestão e à alocação dos recursos necessários para sua implementação.
             """.format(relatorio['indicadores']['ivi'], economia_potencial))
             
-            # Signature and date
+            # Assinatura e data
             st.markdown("---")
             data_atual = datetime.now().strftime("%d/%m/%Y")
             st.markdown(f"""
-            **Report generated on:** {data_atual}
+            **Relatório gerado em:** {data_atual}
             
-            **Leak Detection System - SAAP Coleipa**  
-            *Based on Fuzzy-Bayes hybrid techniques and real monitoring data analysis*
+            **Sistema de Detecção de Vazamentos - SAAP Coleipa**  
+            *Baseado em técnicas híbridas Fuzzy-Bayes e análise de dados reais de monitoramento*
             """)
             
             st.markdown("---")
-            st.success("Complete report generated successfully!")
+            st.success("Relatório completo gerado com sucesso!")
 
 
 def mostrar_pagina_configuracoes(detector):
-    """Settings page"""
-    st.header("⚙️ Settings")
-    st.markdown("Configure system parameters")
+    """Página de configurações"""
+    st.header("⚙️ Configurações")
+    st.markdown("Configurar parâmetros do sistema")
     
-    # System characteristics form
-    st.subheader("System Characteristics")
+    # Formulário de características do sistema
+    st.subheader("Características do Sistema")
     
-    # Create two columns for form organization
+    # Criar duas colunas para organização do formulário
     col1, col2 = st.columns(2)
     
     with col1:
-        area_territorial = st.number_input("Territorial Area (m²)", 
+        area_territorial = st.number_input("Área Territorial (m²)", 
                                            value=detector.caracteristicas_sistema['area_territorial'],
                                            step=1000)
         
-        populacao = st.number_input("Population", 
+        populacao = st.number_input("População", 
                                     value=detector.caracteristicas_sistema['populacao'],
                                     step=100)
         
-        numero_ligacoes = st.number_input("Number of Connections", 
+        numero_ligacoes = st.number_input("Número de Ligações", 
                                           value=detector.caracteristicas_sistema['numero_ligacoes'],
                                           step=10)
         
-        comprimento_rede = st.number_input("Network Length (km)", 
+        comprimento_rede = st.number_input("Comprimento da Rede (km)", 
                                            value=detector.caracteristicas_sistema['comprimento_rede'],
                                            step=0.1)
         
-        densidade_ramais = st.number_input("Branch Density (branches/km)", 
+        densidade_ramais = st.number_input("Densidade de Ramais (ramais/km)", 
                                            value=detector.caracteristicas_sistema['densidade_ramais'],
                                            step=10)
     
     with col2:
-        vazao_media_normal = st.number_input("Normal Average Flow (l/s)", 
+        vazao_media_normal = st.number_input("Vazão Média Normal (l/s)", 
                                              value=detector.caracteristicas_sistema['vazao_media_normal'],
                                              step=0.01)
         
-        pressao_media_normal = st.number_input("Normal Average Pressure (mca)", 
+        pressao_media_normal = st.number_input("Pressão Média Normal (mca)", 
                                                value=detector.caracteristicas_sistema['pressao_media_normal'],
                                                step=0.01)
         
-        perdas_reais_media = st.number_input("Average Real Losses (m³/day)", 
+        perdas_reais_media = st.number_input("Perdas Reais Médias (m³/dia)", 
                                              value=detector.caracteristicas_sistema['perdas_reais_media'],
                                              step=0.1)
         
-        volume_consumido_medio = st.number_input("Average Consumed Volume (m³/day)", 
+        volume_consumido_medio = st.number_input("Volume Consumido Médio (m³/dia)", 
                                                  value=detector.caracteristicas_sistema['volume_consumido_medio'],
                                                  step=0.1)
         
-        percentual_perdas = st.number_input("Loss Percentage (%)", 
+        percentual_perdas = st.number_input("Percentual de Perdas (%)", 
                                              value=detector.caracteristicas_sistema['percentual_perdas'],
                                              step=0.1)
     
-    # Button to update characteristics
-    if st.button("Update System Characteristics"):
+    # Botão para atualizar características
+    if st.button("Atualizar Características do Sistema"):
         novas_caracteristicas = {
             'area_territorial': area_territorial,
             'populacao': populacao,
@@ -2009,103 +2026,103 @@ def mostrar_pagina_configuracoes(detector):
         }
         
         detector.atualizar_caracteristicas_sistema(novas_caracteristicas)
-        st.success("System characteristics updated successfully!")
+        st.success("Características do sistema atualizadas com sucesso!")
     
-    # IVI calculation
+    # Cálculo de IVI
     st.markdown("---")
-    st.subheader("Automatic IVI Calculation")
-    st.markdown("Calculate IVI based on current data and parameters")
+    st.subheader("Cálculo Automático de IVI")
+    st.markdown("Calcular IVI baseado nos dados e parâmetros atuais")
     
-    if st.button("Calculate IVI"):
-        with st.spinner("Calculating IVI..."):
+    if st.button("Calcular IVI"):
+        with st.spinner("Calculando IVI..."):
             ivi, resultados = detector.calcular_ivi_automatico()
             
-            st.success(f"IVI calculated successfully: {ivi:.2f}")
+            st.success(f"IVI calculado com sucesso: {ivi:.2f}")
             
-            # Display detailed results
-            st.subheader("Calculation Details")
+            # Exibir resultados detalhados
+            st.subheader("Detalhes do Cálculo")
             col1, col2 = st.columns(2)
             
             with col1:
-                st.metric("Minimum Night Flow", f"{resultados['vazao_minima_noturna']:.2f} m³/h")
-                st.metric("Average Pressure", f"{resultados['pressao_media']:.2f} mca")
-                st.metric("Real Losses", f"{resultados['perdas_reais']:.2f} m³/day")
+                st.metric("Vazão Mínima Noturna", f"{resultados['vazao_minima_noturna']:.2f} m³/h")
+                st.metric("Pressão Média", f"{resultados['pressao_media']:.2f} mca")
+                st.metric("Perdas Reais", f"{resultados['perdas_reais']:.2f} m³/dia")
                 
             with col2:
-                st.metric("UARL", f"{resultados['uarl_m3_dia']:.2f} m³/day", "Unavoidable Annual Real Losses")
-                st.metric("IPRL", f"{resultados['iprl']:.3f} m³/conn.day", "Real Losses per Connection")
-                st.metric("IPRI", f"{resultados['ipri']:.3f} m³/conn.day", "Unavoidable Real Losses per Connection")
+                st.metric("UARL", f"{resultados['uarl_m3_dia']:.2f} m³/dia", "Perdas Reais Anuais Inevitáveis")
+                st.metric("IPRL", f"{resultados['iprl']:.3f} m³/lig.dia", "Perdas Reais por Ligação")
+                st.metric("IPRI", f"{resultados['ipri']:.3f} m³/lig.dia", "Perdas Reais Inevitáveis por Ligação")
     
-    # Advanced options
+    # Opções avançadas
     st.markdown("---")
-    st.subheader("Advanced Options")
+    st.subheader("Opções Avançadas")
     
-    # Fuzzy system configuration
-    st.markdown("##### Fuzzy System Configuration")
+    # Configuração do sistema fuzzy
+    st.markdown("##### Configuração do Sistema Fuzzy")
     
-    with st.expander("Configure Fuzzy System Parameters"):
-        # Flow parameters
-        st.markdown("**Flow Rate Parameters (m³/h)**")
-        vazao_baixa = st.slider("LOW Flow", 5.0, 10.0, 
-                               (detector.param_vazao['BAIXA']['range'][0], 
-                                detector.param_vazao['BAIXA']['range'][2]),
+    with st.expander("Configurar Parâmetros do Sistema Fuzzy"):
+        # Parâmetros de vazão
+        st.markdown("**Parâmetros de Vazão (m³/h)**")
+        vazao_baixa = st.slider("Vazão BAIXA", 5.0, 10.0, 
+                               (detector.param_vazao['BAIXA']['faixa'][0], 
+                                detector.param_vazao['BAIXA']['faixa'][2]),
                                0.1)
         
-        vazao_normal = st.slider("NORMAL Flow", 8.0, 15.0, 
-                                (detector.param_vazao['NORMAL']['range'][0],
-                                 detector.param_vazao['NORMAL']['range'][2]),
+        vazao_normal = st.slider("Vazão NORMAL", 8.0, 15.0, 
+                                (detector.param_vazao['NORMAL']['faixa'][0],
+                                 detector.param_vazao['NORMAL']['faixa'][2]),
                                 0.1)
         
-        vazao_alta = st.slider("HIGH Flow", 12.0, 18.0, 
-                              (detector.param_vazao['ALTA']['range'][0],
-                               detector.param_vazao['ALTA']['range'][2]),
+        vazao_alta = st.slider("Vazão ALTA", 12.0, 18.0, 
+                              (detector.param_vazao['ALTA']['faixa'][0],
+                               detector.param_vazao['ALTA']['faixa'][2]),
                               0.1)
         
-        # Pressure parameters
-        st.markdown("**Pressure Parameters (mca)**")
-        pressao_baixa = st.slider("LOW Pressure", 0.0, 6.0, 
-                                 (detector.param_pressao['BAIXA']['range'][0],
-                                  detector.param_pressao['BAIXA']['range'][2]),
+        # Parâmetros de pressão
+        st.markdown("**Parâmetros de Pressão (mca)**")
+        pressao_baixa = st.slider("Pressão BAIXA", 0.0, 6.0, 
+                                 (detector.param_pressao['BAIXA']['faixa'][0],
+                                  detector.param_pressao['BAIXA']['faixa'][2]),
                                  0.1)
         
-        pressao_media = st.slider("MEDIUM Pressure", 3.0, 9.0, 
-                                 (detector.param_pressao['MEDIA']['range'][0],
-                                  detector.param_pressao['MEDIA']['range'][2]),
+        pressao_media = st.slider("Pressão MÉDIA", 3.0, 9.0, 
+                                 (detector.param_pressao['MEDIA']['faixa'][0],
+                                  detector.param_pressao['MEDIA']['faixa'][2]),
                                  0.1)
         
-        pressao_alta = st.slider("HIGH Pressure", 6.0, 12.0, 
-                                (detector.param_pressao['ALTA']['range'][0],
-                                 detector.param_pressao['ALTA']['range'][2]),
+        pressao_alta = st.slider("Pressão ALTA", 6.0, 12.0, 
+                                (detector.param_pressao['ALTA']['faixa'][0],
+                                 detector.param_pressao['ALTA']['faixa'][2]),
                                 0.1)
         
-        if st.button("Update Fuzzy Parameters"):
-            # Update fuzzy parameters
+        if st.button("Atualizar Parâmetros Fuzzy"):
+            # Atualizar parâmetros fuzzy
             detector.param_vazao = {
-                'BAIXA': {'range': [vazao_baixa[0], (vazao_baixa[0] + vazao_baixa[1]) / 2, vazao_baixa[1]]},
-                'NORMAL': {'range': [vazao_normal[0], (vazao_normal[0] + vazao_normal[1]) / 2, vazao_normal[1]]},
-                'ALTA': {'range': [vazao_alta[0], (vazao_alta[0] + vazao_alta[1]) / 2, vazao_alta[1]]}
+                'BAIXA': {'faixa': [vazao_baixa[0], (vazao_baixa[0] + vazao_baixa[1]) / 2, vazao_baixa[1]]},
+                'NORMAL': {'faixa': [vazao_normal[0], (vazao_normal[0] + vazao_normal[1]) / 2, vazao_normal[1]]},
+                'ALTA': {'faixa': [vazao_alta[0], (vazao_alta[0] + vazao_alta[1]) / 2, vazao_alta[1]]}
             }
             
             detector.param_pressao = {
-                'BAIXA': {'range': [pressao_baixa[0], (pressao_baixa[0] + pressao_baixa[1]) / 2, pressao_baixa[1]]},
-                'MEDIA': {'range': [pressao_media[0], (pressao_media[0] + pressao_media[1]) / 2, pressao_media[1]]},
-                'ALTA': {'range': [pressao_alta[0], (pressao_alta[0] + pressao_alta[1]) / 2, pressao_alta[1]]}
+                'BAIXA': {'faixa': [pressao_baixa[0], (pressao_baixa[0] + pressao_baixa[1]) / 2, pressao_baixa[1]]},
+                'MEDIA': {'faixa': [pressao_media[0], (pressao_media[0] + pressao_media[1]) / 2, pressao_media[1]]},
+                'ALTA': {'faixa': [pressao_alta[0], (pressao_alta[0] + pressao_alta[1]) / 2, pressao_alta[1]]}
             }
             
-            # Reset fuzzy system to force recreation with new parameters
+            # Resetar sistema fuzzy para forçar recriação com novos parâmetros
             detector.sistema_fuzzy = None
             
-            st.success("Fuzzy parameters updated successfully!")
+            st.success("Parâmetros fuzzy atualizados com sucesso!")
     
-    # Reset system to default values
-    st.markdown("##### Reset System")
-    if st.button("Reset System to Default Values", type="primary", use_container_width=True):
-        # Create a new detector with default values
+    # Resetar sistema para valores padrão
+    st.markdown("##### Resetar Sistema")
+    if st.button("Resetar Sistema para Valores Padrão", type="primary", use_container_width=True):
+        # Criar um novo detector com valores padrão
         st.session_state['detector'] = DetectorVazamentosColeipa()
-        st.success("System reset to default values!")
-        st.info("Refresh the page to see the changes.")
+        st.success("Sistema resetado para valores padrão!")
+        st.info("Atualize a página para ver as mudanças.")
 
 
-# Run the application
+# Executar a aplicação
 if __name__ == "__main__":
-    app_main()
+    aplicacao_principal()

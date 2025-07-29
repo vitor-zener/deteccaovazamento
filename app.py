@@ -1850,6 +1850,16 @@ def mostrar_pagina_bayes(detector):
     O classificador é então treinado para reconhecer esses padrões e identificar situações de vazamento em novos dados.
     """)
 
+def get_interpretacao_ivi(categoria_simples):
+    """Retorna a interpretação baseada na categoria do IVI"""
+    if categoria_simples == 'BOM':
+        return "Sistema eficiente com perdas próximas às inevitáveis"
+    elif categoria_simples == 'REGULAR':
+        return "Sistema regular, melhorias recomendadas"
+    elif categoria_simples == 'RUIM':
+        return "Sistema ruim, ações urgentes necessárias"
+    else:  # MUITO_RUIM
+        return "Sistema muito ruim, intervenção imediata necessária"
 
 def mostrar_pagina_mapa_calor(detector):
     """Página dos mapas de calor IVI"""
@@ -1908,13 +1918,16 @@ def mostrar_pagina_mapa_calor(detector):
     st.markdown("---")
     st.subheader("Análise Detalhada do IVI - Sistema Coleipa")
     
-    # Usar função utilitária para obter classificação
-    classificacao_ivi = detector.classificar_ivi(ivi_atual)
+    # Obter IVI atual de maneira segura
+    ivi_atual = validar_ivi(detector)
+    
+    # Usar classificação manual em vez de detector.classificar_ivi para evitar o erro
+    classificacao_ivi = classificar_ivi_manual(ivi_atual)
     
     st.markdown(f"""
     ##### 🔍 IVI Calculado: {ivi_atual:.2f}
     ##### 📊 Classificação: {classificacao_ivi['categoria']}
-    ##### ⚠️ Interpretação: {classificacao_ivi['interpretacao']}
+    ##### ⚠️ Interpretação: {get_interpretacao_ivi(classificacao_ivi['categoria_simples'])}
     """)
     
     col1, col2 = st.columns(2)

@@ -1629,7 +1629,7 @@ def mostrar_pagina_analise_caso(detector):
                                 help="Valor típico para Coleipa: 3.5 mca")
     
     with col3:
-        ivi = st.number_input("IVI", min_value=1.0, max_value=25.0, value=detector.caracteristicas_sistema['ivi'], step=0.01,
+        ivi = st.number_input("IVI", min_value=1.0, max_value=25.0, value=float(detector.caracteristicas_sistema['ivi']), step=0.01,
                             help="IVI Coleipa: 16.33 (Categoria D)")
     
     # Botão para executar análise
@@ -1970,45 +1970,56 @@ def mostrar_pagina_configuracoes(detector):
     
     with col1:
         area_territorial = st.number_input("Área Territorial (m²)", 
-                                           value=detector.caracteristicas_sistema['area_territorial'],
-                                           step=1000)
+                                           value=int(detector.caracteristicas_sistema['area_territorial']),
+                                           step=1000,
+                                           min_value=0)
         
         populacao = st.number_input("População", 
-                                    value=detector.caracteristicas_sistema['populacao'],
-                                    step=100)
+                                    value=int(detector.caracteristicas_sistema['populacao']),
+                                    step=100,
+                                    min_value=0)
         
         numero_ligacoes = st.number_input("Número de Ligações", 
-                                          value=detector.caracteristicas_sistema['numero_ligacoes'],
-                                          step=10)
+                                          value=int(detector.caracteristicas_sistema['numero_ligacoes']),
+                                          step=10,
+                                          min_value=0)
         
         comprimento_rede = st.number_input("Comprimento da Rede (km)", 
-                                           value=detector.caracteristicas_sistema['comprimento_rede'],
-                                           step=0.1)
+                                           value=float(detector.caracteristicas_sistema['comprimento_rede']),
+                                           step=0.1,
+                                           min_value=0.0)
         
         densidade_ramais = st.number_input("Densidade de Ramais (ramais/km)", 
-                                           value=detector.caracteristicas_sistema['densidade_ramais'],
-                                           step=10)
+                                           value=int(detector.caracteristicas_sistema['densidade_ramais']),
+                                           step=10,
+                                           min_value=0)
     
     with col2:
         vazao_media_normal = st.number_input("Vazão Média Normal (l/s)", 
-                                             value=detector.caracteristicas_sistema['vazao_media_normal'],
-                                             step=0.01)
+                                             value=float(detector.caracteristicas_sistema['vazao_media_normal']),
+                                             step=0.01,
+                                             min_value=0.0)
         
         pressao_media_normal = st.number_input("Pressão Média Normal (mca)", 
-                                               value=detector.caracteristicas_sistema['pressao_media_normal'],
-                                               step=0.01)
+                                               value=float(detector.caracteristicas_sistema['pressao_media_normal']),
+                                               step=0.01,
+                                               min_value=0.0)
         
         perdas_reais_media = st.number_input("Perdas Reais Médias (m³/dia)", 
-                                             value=detector.caracteristicas_sistema['perdas_reais_media'],
-                                             step=0.1)
+                                             value=float(detector.caracteristicas_sistema['perdas_reais_media']),
+                                             step=0.1,
+                                             min_value=0.0)
         
         volume_consumido_medio = st.number_input("Volume Consumido Médio (m³/dia)", 
-                                                 value=detector.caracteristicas_sistema['volume_consumido_medio'],
-                                                 step=0.1)
+                                                 value=float(detector.caracteristicas_sistema['volume_consumido_medio']),
+                                                 step=0.1,
+                                                 min_value=0.0)
         
         percentual_perdas = st.number_input("Percentual de Perdas (%)", 
-                                             value=detector.caracteristicas_sistema['percentual_perdas'],
-                                             step=0.1)
+                                             value=float(detector.caracteristicas_sistema['percentual_perdas']),
+                                             step=0.1,
+                                             min_value=0.0,
+                                             max_value=100.0)
     
     # Botão para atualizar características
     if st.button("Atualizar Características do Sistema"):

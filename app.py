@@ -114,6 +114,74 @@ class DetectorVazamentosColeipa:
         self.sistema_fuzzy = None
         self.modelo_bayes = None
     
+    def classificar_ivi(self, ivi_valor):
+        """
+        Função utilitária para classificar o IVI de forma consistente
+        
+        Parâmetros:
+        ivi_valor (float): Valor do IVI a ser classificado
+        
+        Retorna:
+        dict: Dicionário com categoria, cor, interpretação e recomendação
+        """
+        if ivi_valor <= 4:
+            return {
+                'categoria': 'A - Eficiente',
+                'categoria_simples': 'BOM',
+                'cor': '🟢',
+                'cor_streamlit': 'success',
+                'interpretacao': 'Sistema eficiente com perdas próximas às inevitáveis',
+                'recomendacao': 'Manter práticas atuais de gestão'
+            }
+        elif ivi_valor <= 8:
+            return {
+                'categoria': 'B - Regular',
+                'categoria_simples': 'REGULAR',
+                'cor': '🟡',
+                'cor_streamlit': 'info',
+                'interpretacao': 'Sistema regular, melhorias recomendadas',
+                'recomendacao': 'Implementar melhorias graduais no sistema'
+            }
+        elif ivi_valor <= 16:
+            return {
+                'categoria': 'C - Ruim',
+                'categoria_simples': 'RUIM',
+                'cor': '🟠',
+                'cor_streamlit': 'warning',
+                'interpretacao': 'Sistema ruim, ações urgentes necessárias',
+                'recomendacao': 'Implementar programa de redução de perdas urgente'
+            }
+        else:
+            return {
+                'categoria': 'D - Muito Ruim',
+                'categoria_simples': 'MUITO RUIM',
+                'cor': '🔴',
+                'cor_streamlit': 'error',
+                'interpretacao': 'Sistema muito ruim, intervenção imediata necessária',
+                'recomendacao': 'Programas de redução de perdas são imperiosos e prioritários'
+            }
+    
+    def exibir_status_ivi_streamlit(self, ivi_valor, prefixo="IVI ATUAL DO SISTEMA"):
+        """
+        Exibe o status do IVI no Streamlit com formatação consistente
+        
+        Parâmetros:
+        ivi_valor (float): Valor do IVI
+        prefixo (str): Texto que precede o valor do IVI
+        """
+        classificacao = self.classificar_ivi(ivi_valor)
+        
+        if classificacao['cor_streamlit'] == 'success':
+            st.success(f"✅ **{prefixo}: {ivi_valor:.2f}** - {classificacao['categoria']}")
+        elif classificacao['cor_streamlit'] == 'info':
+            st.info(f"ℹ️ **{prefixo}: {ivi_valor:.2f}** - {classificacao['categoria']}")
+        elif classificacao['cor_streamlit'] == 'warning':
+            st.warning(f"⚠️ **{prefixo}: {ivi_valor:.2f}** - {classificacao['categoria']}")
+        else:  # error
+            st.error(f"🚨 **{prefixo}: {ivi_valor:.2f}** - {classificacao['categoria']}")
+        
+        return classificacao
+    
     def _garantir_parametros_ivi(self):
         """
         Garante que todos os parâmetros necessários para cálculo de IVI existem
@@ -550,7 +618,7 @@ class DetectorVazamentosColeipa:
         # Dados de vazamento
         vazao_vazamento = np.random.normal(vazao_vazamento_mean, vazao_vazamento_std, n_vazamento)
         pressao_vazamento = np.random.normal(pressao_vazamento_mean, pressao_vazamento_std, n_vazamento)
-        ivi_vazamento = np.random.normal(self.caracteristicas_sistema['ivi'], 3, n_vazamento)  # IVI similar ao de Coleipa
+        ivi_vazamento = np.random.normal(self.caracteristicas_sistema.get('ivi', 16.33), 3, n_vazamento)  # IVI dinâmico similar ao de Coleipa
         
         # Combinar dados
         X = np.vstack([
@@ -619,7 +687,7 @@ class DetectorVazamentosColeipa:
         if pressao is None:
             pressao = 3.5   # Pressão típica baixa
         if ivi is None:
-            ivi = self.caracteristicas_sistema['ivi']   # IVI real de Coleipa
+            ivi = self.caracteristicas_sistema.get('ivi', 16.33)   # IVI atual calculado dinamicamente
         
         # Classificação baseada nos dados de Coleipa
         if vazao < 9:
@@ -636,14 +704,9 @@ class DetectorVazamentosColeipa:
         else:
             classe_pressao = "ALTA (boa)"
         
-        if ivi < 4:
-            classe_ivi = "BOM (Categoria A)"
-        elif ivi < 8:
-            classe_ivi = "REGULAR (Categoria B)"
-        elif ivi < 16:
-            classe_ivi = "RUIM (Categoria C)"
-        else:
-            classe_ivi = "MUITO RUIM (Categoria D)"
+        # Usar função utilitária para classificar IVI
+        classificacao_ivi = self.classificar_ivi(ivi)
+        classe_ivi = f"{classificacao_ivi['categoria_simples']} ({classificacao_ivi['categoria']})"
         
         # Avaliação fuzzy
         risco_fuzzy = self.avaliar_risco_fuzzy(vazao, pressao, ivi)
@@ -684,8 +747,8 @@ class DetectorVazamentosColeipa:
                 resultado['cor'] = "🟢"
         
         # Comparação com dados reais de Coleipa
-        resultado['percentual_perdas'] = self.caracteristicas_sistema['percentual_perdas']
-        resultado['ivi_real'] = self.caracteristicas_sistema['ivi']
+        resultado['percentual_perdas'] = self.caracteristicas_sistema.get('percentual_perdas', 44.50)
+        resultado['ivi_real'] = self.caracteristicas_sistema.get('ivi', 16.33)
         
         return resultado
     
@@ -729,7 +792,7 @@ class DetectorVazamentosColeipa:
             'Tempo': tempo,
             'Vazao': vazao,
             'Pressao': pressao,
-            'IVI': [self.caracteristicas_sistema['ivi']] * len(tempo),
+            'IVI': [self.caracteristicas_sistema.get('ivi', 16.33)] * len(tempo),  # IVI dinâmico
             'Vazamento_Real': [0] * inicio_vazamento + [1] * (len(tempo) - inicio_vazamento)
         })
         
@@ -803,13 +866,31 @@ class DetectorVazamentosColeipa:
         if self.sistema_fuzzy is None:
             self.criar_sistema_fuzzy()
         
-        # IVI atual para categoria "MUITO_RUIM"
-        ivi_atual = self.caracteristicas_sistema['ivi']
+        # IVI atual calculado dinamicamente
+        ivi_atual = self.caracteristicas_sistema.get('ivi', 16.33)
+        
+        # Usar função utilitária para determinar categoria do IVI atual
+        classificacao_atual = self.classificar_ivi(ivi_atual)
+        categoria_atual = classificacao_atual['categoria_simples']
+        
+        # Determinar índice para substituição
+        if categoria_atual == "BOM":
+            indice_atual = 0
+        elif categoria_atual == "REGULAR":
+            indice_atual = 1
+        elif categoria_atual == "RUIM":
+            indice_atual = 2
+        else:  # MUITO RUIM
+            indice_atual = 3
         
         # Valores de IVI baseados na classificação do Banco Mundial
-        ivi_valores = [2, 6, 12, 16]  # Representativos das categorias A, B, C, D
-        ivi_categorias = ['BOM (2.0)', 'REGULAR (6.0)', 'RUIM (12.0)', f'MUITO RUIM (16.0)']
+        ivi_valores = [2, 6, 12, 18]  # Valores representativos padrão
+        ivi_categorias = ['BOM (2.0)', 'REGULAR (6.0)', 'RUIM (12.0)', 'MUITO RUIM (18.0)']
         ivi_classificacoes = ['Categoria A', 'Categoria B', 'Categoria C', 'Categoria D']
+        
+        # Substituir o valor na categoria correta pelo IVI atual
+        ivi_valores[indice_atual] = ivi_atual
+        ivi_categorias[indice_atual] = f'{categoria_atual} ({ivi_atual:.2f})'
         
         # Valores para mapa de calor baseados nos dados de Coleipa
         vazoes = np.linspace(7, 16, resolucao)
@@ -919,17 +1000,18 @@ class DetectorVazamentosColeipa:
                    bbox=dict(boxstyle="round,pad=0.2", facecolor="lightgreen", alpha=0.9))
             
             # Marcar o ponto característico de Coleipa em todos os gráficos
-            if idx == 3:  # Último gráfico (IVI Muito Ruim) - destaque especial
+            # Destacar especialmente no mapa que corresponde ao IVI atual
+            if idx == indice_atual:  # Mapa correspondente ao IVI atual
                 ax.scatter([14.5], [3.5], color='red', s=300, marker='*', 
-                          edgecolors='darkred', linewidth=3, label='Ponto Coleipa\n(IVI=16.33)', zorder=10)
-                ax.annotate(f'SISTEMA COLEIPA\n(Vazão=14.5, Pressão=3.5)\nIVI={ivi_atual:.2f} - CRÍTICO', 
+                          edgecolors='darkred', linewidth=3, label=f'Ponto Coleipa\n(IVI={ivi_atual:.2f})', zorder=10)
+                ax.annotate(f'SISTEMA COLEIPA\n(Vazão=14.5, Pressão=3.5)\nIVI={ivi_atual:.2f} - {categoria_atual}', 
                            xy=(14.5, 3.5), xytext=(11, 2.8),
                            arrowprops=dict(arrowstyle='->', color='red', lw=2),
                            fontsize=9, fontweight='bold', color='red',
                            bbox=dict(boxstyle="round,pad=0.3", facecolor="yellow", alpha=0.9))
                 ax.legend(loc='upper left', fontsize=9)
             else:
-                # Marcar o ponto de Coleipa nos outros gráficos também
+                # Marcar o ponto de Coleipa nos outros gráficos também, mas com menos destaque
                 ax.scatter([14.5], [3.5], color='red', s=150, marker='*', 
                           edgecolors='darkred', linewidth=2, alpha=0.7, zorder=8)
             
@@ -956,8 +1038,8 @@ class DetectorVazamentosColeipa:
         cbar.set_ticklabels(['0%\n(Muito Baixo)', '20%\n(Baixo)', '40%\n(Médio)', 
                             '60%\n(Alto)', '80%\n(Muito Alto)', '100%\n(Crítico)'])
         
-        # Título principal melhorado
-        fig.suptitle('Mapas de Risco para diferentes IVIs\nClassificação Banco Mundial - Sistema Coleipa', 
+        # Título principal melhorado com IVI dinâmico e categoria correta
+        fig.suptitle(f'Mapas de Risco para diferentes IVIs\nClassificação Banco Mundial - Sistema Coleipa (IVI Atual: {ivi_atual:.2f} - {categoria_atual})', 
                      fontsize=16, fontweight='bold', y=0.96)
         
         return fig, ivi_valores
@@ -1161,7 +1243,7 @@ def aplicacao_principal():
     
     # Conteúdo principal baseado na página selecionada
     if pagina_selecionada == "Início":
-        mostrar_pagina_inicio()
+        mostrar_pagina_inicio(detector)
     
     elif pagina_selecionada == "Dados de Monitoramento":
         mostrar_pagina_dados(detector)
@@ -1188,7 +1270,7 @@ def aplicacao_principal():
         mostrar_pagina_configuracoes(detector)
 
 
-def mostrar_pagina_inicio():
+def mostrar_pagina_inicio(detector):
     """Página inicial da aplicação"""
     st.header("Bem-vindo ao Sistema de Detecção de Vazamentos")
     
@@ -1197,6 +1279,10 @@ def mostrar_pagina_inicio():
     Este sistema utiliza uma abordagem híbrida combinando lógica fuzzy e análise Bayesiana para 
     detectar vazamentos em redes de abastecimento de água baseado em dados de monitoramento.
     """)
+    
+    # Exibir IVI atual no topo usando a função utilitária
+    ivi_atual = detector.caracteristicas_sistema.get('ivi', 16.33)
+    detector.exibir_status_ivi_streamlit(ivi_atual, "IVI ATUAL DO SISTEMA")
     
     # Visão geral em 3 colunas
     col1, col2, col3 = st.columns(3)
@@ -1232,11 +1318,14 @@ def mostrar_pagina_inicio():
     col1, col2 = st.columns(2)
     
     with col1:
-        st.markdown("""
+        # Obter classificação atual do IVI
+        classificacao_ivi = detector.classificar_ivi(ivi_atual)
+        
+        st.markdown(f"""
         O SAAP (Sistema de Abastecimento de Água Potável) do bairro Coleipa, localizado em Santa 
         Bárbara do Pará, apresenta características típicas de sistemas com perdas significativas:
         
-        - **IVI (Índice de Vazamentos da Infraestrutura)**: 16.33
+        - **IVI (Índice de Vazamentos da Infraestrutura)**: {ivi_atual:.2f} - {classificacao_ivi['categoria']}
         - **Perdas reais**: 44.50% do volume distribuído
         - **Pressões**: Consistentemente abaixo do mínimo recomendado (10 mca)
         - **Padrão característico**: Vazões altas com pressões baixas
@@ -1348,6 +1437,10 @@ def mostrar_pagina_fuzzy(detector):
     st.subheader("Teste Interativo")
     st.markdown("Ajuste os parâmetros abaixo para testar o comportamento do sistema fuzzy:")
     
+    # Mostrar IVI atual usando a função utilitária
+    ivi_atual = detector.caracteristicas_sistema.get('ivi', 16.33)
+    detector.exibir_status_ivi_streamlit(ivi_atual, "IVI atual do sistema")
+    
     col1, col2, col3 = st.columns(3)
     
     with col1:
@@ -1357,7 +1450,7 @@ def mostrar_pagina_fuzzy(detector):
         pressao_teste = st.slider("Pressão (mca)", 0.0, 10.0, 3.5, 0.1)
     
     with col3:
-        ivi_teste = st.slider("IVI", 1.0, 25.0, float(detector.caracteristicas_sistema['ivi']), 0.01)
+        ivi_teste = st.slider("IVI", 1.0, 25.0, float(ivi_atual), 0.01)
     
     if st.button("Calcular Risco Fuzzy"):
         with st.spinner("Calculando risco..."):
@@ -1430,11 +1523,14 @@ def mostrar_pagina_bayes(detector):
                 
                 # Características do sistema
                 st.markdown("#### Características do Sistema Coleipa")
+                ivi_atual = detector.caracteristicas_sistema.get('ivi', 16.33)
+                classificacao_ivi = detector.classificar_ivi(ivi_atual)
+                
                 st.markdown(f"""
                 - **População**: {detector.caracteristicas_sistema['populacao']} habitantes
                 - **Área**: {detector.caracteristicas_sistema['area_territorial']/1000:.1f} km²
                 - **Perdas reais**: {detector.caracteristicas_sistema['percentual_perdas']:.1f}%
-                - **IVI**: {detector.caracteristicas_sistema['ivi']:.2f} (Categoria D - Muito Ruim)
+                - **IVI**: {ivi_atual:.2f} ({classificacao_ivi['categoria']})
                 """)
     
     # Explicação do modelo
@@ -1469,10 +1565,26 @@ def mostrar_pagina_mapa_calor(detector):
     st.header("🔥 Mapas de Calor IVI")
     st.markdown("Análise de risco para diferentes combinações de vazão e pressão, considerando diferentes valores de IVI")
     
+    # Mostrar IVI atual calculado no topo da página usando função utilitária
+    ivi_atual = detector.caracteristicas_sistema.get('ivi', 16.33)
+    detector.exibir_status_ivi_streamlit(ivi_atual, "IVI ATUAL DO SISTEMA")
+    
     # Configuração do mapa de calor
     st.subheader("Configuração")
-    resolucao = st.slider("Resolução do mapa", 10, 50, 30, 5, 
-                         help="Valores maiores geram mapas mais detalhados, mas aumentam o tempo de processamento")
+    
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        resolucao = st.slider("Resolução do mapa", 10, 50, 30, 5, 
+                             help="Valores maiores geram mapas mais detalhados, mas aumentam o tempo de processamento")
+    
+    with col2:
+        st.markdown("##### Atualizar IVI")
+        if st.button("🔄 Recalcular IVI", help="Recalcula o IVI com os parâmetros atuais"):
+            with st.spinner("Recalculando IVI..."):
+                novo_ivi, _ = detector.calcular_ivi_automatico()
+                st.success(f"IVI atualizado: {novo_ivi:.2f}")
+                st.info("Atualize a página para ver as mudanças nos mapas.")
     
     # Botão para gerar mapas de calor
     if st.button("Gerar Mapas de Calor"):
@@ -1484,10 +1596,13 @@ def mostrar_pagina_mapa_calor(detector):
     st.markdown("---")
     st.subheader("Análise Detalhada do IVI - Sistema Coleipa")
     
+    # Usar função utilitária para obter classificação
+    classificacao_ivi = detector.classificar_ivi(ivi_atual)
+    
     st.markdown(f"""
-    ##### 🔍 IVI Calculado: {detector.caracteristicas_sistema['ivi']:.2f}
-    ##### 📊 Classificação: Categoria D (Muito Ruim)
-    ##### ⚠️ Interpretação: IVI > 16 indica uso extremamente ineficiente de recursos
+    ##### 🔍 IVI Calculado: {ivi_atual:.2f}
+    ##### 📊 Classificação: {classificacao_ivi['categoria']}
+    ##### ⚠️ Interpretação: {classificacao_ivi['interpretacao']}
     """)
     
     col1, col2 = st.columns(2)
@@ -1502,9 +1617,9 @@ def mostrar_pagina_mapa_calor(detector):
         """)
     
     with col2:
-        st.markdown("##### 🎯 Análise específica Coleipa (IVI = 16.33):")
+        st.markdown(f"##### 🎯 Análise específica Coleipa (IVI = {ivi_atual:.2f}):")
         st.markdown(f"""
-        - Perdas reais são {detector.caracteristicas_sistema['ivi']:.2f} vezes maiores que as inevitáveis
+        - Perdas reais são {ivi_atual:.2f} vezes maiores que as inevitáveis
         - Potencial de redução de perdas > 400 L/ligação.dia
         - Localização no mapa: zona vermelha (risco alto)
         - Combinação crítica: Vazão ALTA + Pressão BAIXA
@@ -1524,7 +1639,7 @@ def mostrar_pagina_mapa_calor(detector):
         st.markdown("**IVI RUIM (12.0):**  \nAmarelo-laranja (risco alto)")
     
     with col4:
-        st.markdown(f"**IVI MUITO RUIM ({detector.caracteristicas_sistema['ivi']:.2f}):**  \nVermelho intenso (risco crítico)")
+        st.markdown(f"**IVI MUITO RUIM ({ivi_atual:.2f}):**  \nVermelho intenso (risco crítico)")
 
 
 def mostrar_pagina_simulacao(detector):
@@ -1620,6 +1735,10 @@ def mostrar_pagina_analise_caso(detector):
     # Formulário para entrada de dados
     st.subheader("Parâmetros do Sistema")
     
+    # Mostrar IVI atual sendo usado
+    ivi_atual = detector.caracteristicas_sistema.get('ivi', 16.33)
+    detector.exibir_status_ivi_streamlit(ivi_atual, "IVI atual do sistema")
+    
     col1, col2, col3 = st.columns(3)
     
     with col1:
@@ -1631,8 +1750,8 @@ def mostrar_pagina_analise_caso(detector):
                                 help="Valor típico para Coleipa: 3.5 mca")
     
     with col3:
-        ivi = st.number_input("IVI", min_value=1.0, max_value=25.0, value=float(detector.caracteristicas_sistema['ivi']), step=0.01,
-                            help="IVI Coleipa: 16.33 (Categoria D)")
+        ivi = st.number_input("IVI", min_value=1.0, max_value=25.0, value=float(ivi_atual), step=0.01,
+                            help=f"IVI atual do sistema Coleipa: {ivi_atual:.2f}")
     
     # Botão para executar análise
     if st.button("Analisar Caso"):
@@ -1674,7 +1793,7 @@ def mostrar_pagina_analise_caso(detector):
                 st.subheader("Comparação com Sistema Coleipa")
                 st.markdown(f"""
                 - **Perdas reais**: {resultado['percentual_perdas']:.1f}%
-                - **IVI real**: {resultado['ivi_real']:.2f} (Categoria D - Muito Ruim)
+                - **IVI real**: {resultado['ivi_real']:.2f}
                 - **Prioridade recomendada**: Detecção de vazamentos
                 """)
     
@@ -1716,9 +1835,16 @@ def mostrar_pagina_relatorio(detector):
         with st.spinner("Gerando relatório..."):
             relatorio = detector.gerar_relatorio_coleipa()
             
+            # Obter IVI atual calculado
+            ivi_atual = detector.caracteristicas_sistema.get('ivi', 16.33)
+            
             # Cabeçalho do relatório
             st.markdown("---")
             st.subheader("RELATÓRIO DE ANÁLISE - SISTEMA COLEIPA")
+            
+            # Mostrar IVI atual no topo usando função utilitária
+            detector.exibir_status_ivi_streamlit(ivi_atual, "IVI ATUAL")
+            
             st.markdown("---")
             
             # 1. Características do Sistema
@@ -1757,12 +1883,13 @@ def mostrar_pagina_relatorio(detector):
             with col3:
                 st.metric("IVI", f"{relatorio['indicadores']['ivi']:.2f}", "Índice de Vazamentos da Infraestrutura")
             
-            # 4. Classificação
+            # 4. Classificação usando função utilitária
             st.subheader("4. CLASSIFICAÇÃO (Banco Mundial)")
+            classificacao_ivi = detector.classificar_ivi(ivi_atual)
             st.markdown(f"""
-            - **Categoria**: {relatorio['classificacao']['categoria']}
-            - **Interpretação**: {relatorio['classificacao']['interpretacao']}
-            - **Recomendação**: {relatorio['classificacao']['recomendacao']}
+            - **Categoria**: {classificacao_ivi['categoria']}
+            - **Interpretação**: {classificacao_ivi['interpretacao']}
+            - **Recomendação**: {classificacao_ivi['recomendacao']}
             """)
             
             # 5. Metodologia NPR - Priorização de Ações
@@ -2252,16 +2379,14 @@ def mostrar_pagina_configuracoes(detector):
     st.subheader("Cálculo Automático de IVI")
     st.markdown("Calcular IVI baseado nos parâmetros atuais do sistema com a nova fórmula")
     
-    # Cálculo automático de IVI com parâmetros atuais
-    st.markdown("---")
-    st.subheader("Cálculo Automático de IVI")
-    st.markdown("Calcular IVI baseado nos parâmetros atuais do sistema")
-    
     if st.button("Calcular IVI"):
         with st.spinner("Calculando IVI..."):
             ivi, resultados = detector.calcular_ivi_automatico()
             
             st.success(f"IVI calculado com sucesso: {ivi:.2f}")
+            
+            # Exibir classificação usando função utilitária
+            detector.exibir_status_ivi_streamlit(ivi, "IVI CALCULADO")
             
             # Exibir resultados detalhados conforme as imagens
             st.subheader("Detalhes do Cálculo - Conforme Documentação")
@@ -2309,40 +2434,27 @@ def mostrar_pagina_configuracoes(detector):
                 
                 st.markdown("##### 📈 Resultados Finais")
                 st.metric("IPRL", f"{resultados['iprl']:.3f} m³/lig.dia", "Perdas Reais por Ligação")
-                st.metric("IPRI", f"{resultados['ipri']:.6f} m³/lig.dia", "Perdas Reais Inevitáveis")
+                st.metric("IPRI", f"{resultados['ipri']:.6f} m³/lig.dia", "Perdas Reais Inevitáveis (Nova Fórmula)")
                 st.metric("IVI", f"{resultados['ivi']:.2f}", "Índice de Vazamentos da Infraestrutura")
                 
                 # Destacar que está usando nova fórmula
                 st.info("💡 **Cálculo realizado com a nova fórmula IPRI**")
             
-            # Classificação do IVI
+            # Usar função utilitária para classificação detalhada
+            classificacao_ivi = detector.classificar_ivi(ivi)
+            
             st.markdown("---")
             st.subheader("Classificação do IVI (Banco Mundial)")
             
-            if ivi <= 4:
-                categoria = "A - Eficiente"
-                cor = "🟢"
-                interpretacao = "Sistema eficiente com perdas próximas às inevitáveis"
-            elif ivi <= 8:
-                categoria = "B - Regular"
-                cor = "🟡"
-                interpretacao = "Sistema regular, melhorias recomendadas"
-            elif ivi <= 16:
-                categoria = "C - Ruim"
-                cor = "🟠"
-                interpretacao = "Sistema ruim, ações urgentes necessárias"
-            else:
-                categoria = "D - Muito Ruim"
-                cor = "🔴"
-                interpretacao = "Sistema muito ruim, intervenção imediata necessária"
-            
             st.markdown(f"""
-            ### {cor} Categoria {categoria}
+            ### {classificacao_ivi['cor']} {classificacao_ivi['categoria']}
             **IVI: {ivi:.2f}**  
-            *{interpretacao}*
+            *{classificacao_ivi['interpretacao']}*
+            
+            **Recomendação:** {classificacao_ivi['recomendacao']}
             
             O sistema Coleipa apresenta IVI = {ivi:.2f}, indicando que as perdas reais são 
-            {ivi:.2f} vezes maiores que as perdas inevitáveis, caracterizando uso muito ineficiente dos recursos.
+            {ivi:.2f} vezes maiores que as perdas inevitáveis.
             
             **Nota:** Com a nova fórmula IPRI, o resultado pode diferir ligeiramente do valor original 
             devido às mudanças nos coeficientes e estrutura da equação.
@@ -2531,10 +2643,12 @@ def mostrar_pagina_configuracoes(detector):
     
     with col2:
         st.markdown("##### 📊 IVI")
-        st.text(f"IVI Atual: {detector.caracteristicas_sistema.get('ivi', 16.33):.2f}")
+        ivi_atual = detector.caracteristicas_sistema.get('ivi', 16.33)
+        classificacao_ivi = detector.classificar_ivi(ivi_atual)
+        st.text(f"IVI Atual: {ivi_atual:.2f}")
+        st.text(f"Categoria: {classificacao_ivi['categoria_simples']}")
         st.text(f"IPRL: {detector.caracteristicas_sistema.get('iprl', 0.343):.3f}")
         st.text(f"IPRI: {detector.caracteristicas_sistema.get('ipri', 0.021):.3f}")
-        st.text(f"Volume Perdido: {detector.caracteristicas_sistema.get('volume_perdido_anual', 37547.55):.0f} m³/ano")
     
     with col3:
         st.markdown("##### ⚙️ Operação")

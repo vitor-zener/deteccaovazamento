@@ -47,13 +47,13 @@ class DetectorVazamentosColeipa:
             'iprl': 0.343,  # m³/ligação.dia (float) - conforme imagem
             'ipri': 0.021,  # m³/ligação.dia (float) - conforme imagem
             'ivi': 16.33,  # Índice de Vazamentos da Infraestrutura (float) - resultado correto
-            # Parâmetros para cálculo de IVI (parametrizáveis)
+            # Parâmetros para cálculo de IVI (parametrizáveis) - Nova fórmula
             'volume_perdido_anual': 37547.55,  # Vp - Volume perdido anual (m³/ano)
             'distancia_lote_medidor': 0.001,  # Lp - Distância entre limite do lote e medidor (km)
             'pressao_operacao_adequada': 20.0,  # P - Pressão média de operação adequada (mca)
-            'coeficiente_rede': 8.0,  # Coeficiente para comprimento da rede na fórmula IPRI
-            'coeficiente_ligacoes': 0.8,  # Coeficiente para número de ligações na fórmula IPRI
-            'coeficiente_ramais': 25.0  # Coeficiente para distância dos ramais na fórmula IPRI
+            'coeficiente_rede': 18.0,  # Coeficiente para comprimento da rede (fixo: 18)
+            'coeficiente_ligacoes': 0.8,  # Coeficiente para número de ligações (fixo: 0.8)
+            'coeficiente_ramais': 25.0  # Coeficiente para distância dos ramais (fixo: 25)
         }
         
         # Garantir compatibilidade com versões anteriores
@@ -123,7 +123,7 @@ class DetectorVazamentosColeipa:
             'volume_perdido_anual': 37547.55,
             'distancia_lote_medidor': 0.001,
             'pressao_operacao_adequada': 20.0,
-            'coeficiente_rede': 8.0,
+            'coeficiente_rede': 18.0,      # Novo valor conforme fórmula atualizada
             'coeficiente_ligacoes': 0.8,
             'coeficiente_ramais': 25.0
         }
@@ -462,9 +462,11 @@ class DetectorVazamentosColeipa:
         # IPRL = Vp / (Nc × 365)
         iprl = Vp_anual / (Nc * 365) if Nc > 0 else 0  # m³/lig.dia
         
-        # Cálculo do IPRI (Índice de Perdas Reais Inevitáveis) - Equação 4  
-        # IPRI = (coef_rede × Lm + coef_ligacoes × Nc + coef_ramais × Lp) × P / Nc
-        ipri = (coef_rede * Lm + coef_ligacoes * Nc + coef_ramais * Lp) * P / Nc if Nc > 0 else 0  # m³/lig.dia
+        # Cálculo do IPRI (Índice de Perdas Reais Inevitáveis) - Equação 4 (Nova Fórmula)
+        # IPRI = (18 × Lm + 0,8 × Nc + 25 × Lp × Nc) × P / (Nc × 1000)
+        numerador_ipri = (coef_rede * Lm + coef_ligacoes * Nc + coef_ramais * Lp * Nc) * P
+        denominador_ipri = Nc * 1000
+        ipri = numerador_ipri / denominador_ipri if denominador_ipri > 0 else 0  # m³/lig.dia
         
         # Cálculo do IVI (Índice de Vazamentos na Infraestrutura) - Equação 5
         # IVI = IPRL / IPRI
@@ -497,8 +499,8 @@ class DetectorVazamentosColeipa:
             'ipri': ipri,
             'ivi': ivi,
             'calculo_iprl': f"{Vp_anual:.2f} / ({Nc} × 365) = {iprl:.3f} m³/lig.dia",
-            'calculo_ipri': f"({coef_rede} × {Lm} + {coef_ligacoes} × {Nc} + {coef_ramais} × {Lp}) × {P} / {Nc} = {ipri:.3f} m³/lig.dia",
-            'calculo_ivi': f"{iprl:.3f} / {ipri:.3f} = {ivi:.2f}"
+            'calculo_ipri': f"({coef_rede} × {Lm} + {coef_ligacoes} × {Nc} + {coef_ramais} × {Lp} × {Nc}) × {P} / ({Nc} × 1000) = {ipri:.6f} m³/lig.dia",
+            'calculo_ivi': f"{iprl:.3f} / {ipri:.6f} = {ivi:.2f}"
         }
         
         return ivi, resultados
@@ -2141,13 +2143,13 @@ def mostrar_pagina_configuracoes(detector):
         
         with col2:
             st.markdown("##### Coeficientes da Fórmula IPRI")
-            st.markdown("*IPRI = (C₁×Lm + C₂×Nc + C₃×Lp) × P / Nc*")
+            st.markdown("*IPRI = (C₁×Lm + C₂×Nc + C₃×Lp×Nc) × P / (Nc×1000)*")
             
             coeficiente_rede = st.number_input("Coeficiente da Rede (C₁)", 
-                                               value=float(detector.caracteristicas_sistema.get('coeficiente_rede', 8.0)),
+                                               value=float(detector.caracteristicas_sistema.get('coeficiente_rede', 18.0)),
                                                step=0.1,
                                                min_value=0.0,
-                                               help="Coeficiente para comprimento da rede (padrão: 8)")
+                                               help="Coeficiente para comprimento da rede (padrão: 18)")
             
             coeficiente_ligacoes = st.number_input("Coeficiente das Ligações (C₂)", 
                                                    value=float(detector.caracteristicas_sistema.get('coeficiente_ligacoes', 0.8)),
@@ -2182,13 +2184,13 @@ def mostrar_pagina_configuracoes(detector):
         
         # Mostrar fórmulas de referência
         st.markdown("---")
-        st.markdown("##### 📐 Fórmulas de Referência")
+        st.markdown("##### 📐 Fórmulas de Referência (Atualizadas)")
         st.markdown("""
         **Equação 3 - IPRL (Índice de Perdas Reais por Ligação):**  
         `IPRL = Vp / (Nc × 365)`
         
-        **Equação 4 - IPRI (Índice de Perdas Reais Inevitáveis):**  
-        `IPRI = (C₁ × Lm + C₂ × Nc + C₃ × Lp) × P / Nc`
+        **Equação 4 - IPRI (Índice de Perdas Reais Inevitáveis) - NOVA FÓRMULA:**  
+        `IPRI = (18 × Lm + 0,8 × Nc + 25 × Lp × Nc) × P / (Nc × 1000)`
         
         **Equação 5 - IVI (Índice de Vazamentos na Infraestrutura):**  
         `IVI = IPRL / IPRI`
@@ -2199,47 +2201,56 @@ def mostrar_pagina_configuracoes(detector):
         - Lm = Comprimento da rede (km)
         - Lp = Distância lote-medidor (km)
         - P = Pressão de operação adequada (mca)
-        - C₁, C₂, C₃ = Coeficientes da fórmula IPRI
+        
+        **Mudanças na Nova Fórmula:**
+        - Coeficiente da rede: 8 → 18
+        - Termo dos ramais: 25 × Lp → 25 × Lp × Nc  
+        - Denominador: Nc → Nc × 1000
         """)
         
-        # Seção de ajuda
+        # Seção de ajuda atualizada
         st.markdown("---")
-        st.markdown("##### 💡 Ajuda - Como Configurar os Parâmetros")
+        st.markdown("##### 💡 Ajuda - Nova Fórmula IPRI")
         
-        with st.expander("📖 Guia de Configuração dos Parâmetros"):
+        with st.expander("📖 Guia da Nova Fórmula IPRI"):
             st.markdown("""
-            **Como obter os valores para seu sistema:**
+            **Nova Fórmula IPRI:**
+            `IPRI = (18 × Lm + 0,8 × Nc + 25 × Lp × Nc) × P / (Nc × 1000)`
             
-            1. **Volume Perdido Anual (Vp):**
-               - Calcule: Volume Distribuído - Volume Consumido - Perdas Aparentes
-               - Unidade: m³/ano
-               - Use dados de 12 meses para maior precisão
+            **Principais Mudanças:**
             
-            2. **Distância Lote-Medidor (Lp):**
-               - Distância média entre o limite do lote e o medidor
-               - Geralmente entre 0.001 km (1m) e 0.010 km (10m)
-               - Para sistemas urbanos: ~0.001 km
-               - Para sistemas rurais: pode ser maior
+            1. **Coeficiente da Rede (18):**
+               - Valor fixo aumentado de 8 para 18
+               - Reflete maior impacto do comprimento da rede nas perdas inevitáveis
             
-            3. **Pressão de Operação Adequada (P):**
-               - Pressão média que o sistema deveria operar idealmente
-               - NBR 12218: mínimo 10 mca, recomendado 15-50 mca
-               - Use a pressão média planejada/projetada, não a atual
+            2. **Termo dos Ramais (25 × Lp × Nc):**
+               - Agora multiplicado pelo número de ligações (Nc)
+               - Considera que cada ligação tem sua própria distância lote-medidor
+               - Impacto proporcional ao número total de ligações
             
-            4. **Coeficientes da Fórmula IPRI:**
-               - **C₁ (Rede):** Padrão = 8 (pode variar de 6-18 conforme literatura)
-               - **C₂ (Ligações):** Padrão = 0.8 (pode variar de 0.5-1.5)
-               - **C₃ (Ramais):** Padrão = 25 (pode variar de 20-50)
-               - Use valores padrão se não tiver dados específicos
+            3. **Denominador (Nc × 1000):**
+               - Fator 1000 para conversão de unidades
+               - Resulta em valores IPRI menores
+               - Melhor adequação às escalas típicas de sistemas
             
-            **Valores de Referência (Sistema Coleipa):**
-            - Volume Perdido: 37.547,55 m³/ano
-            - Distância Lote-Medidor: 0,001 km
-            - Pressão Operação: 20 mca
-            - Coeficientes: 8 / 0.8 / 25
+            **Exemplo de Cálculo (Coleipa):**
+            - Lm = 3 km, Nc = 300, Lp = 0,001 km, P = 20 mca
+            - Numerador: (18×3 + 0,8×300 + 25×0,001×300) × 20
+            - Numerador: (54 + 240 + 7,5) × 20 = 6.030
+            - Denominador: 300 × 1000 = 300.000
+            - IPRI = 6.030 / 300.000 = 0,0201 m³/lig.dia
             
-            **Resultado Esperado:** IVI = 16,33 (Categoria D - Muito Ruim)
+            **Vantagens da Nova Fórmula:**
+            - Melhor representação do impacto dos ramais
+            - Valores mais realistas para IPRI
+            - Maior sensibilidade ao número de ligações
+            - Adequação a diferentes portes de sistema
             """)
+    
+    # Cálculo automático de IVI com parâmetros atuais
+    st.markdown("---")
+    st.subheader("Cálculo Automático de IVI")
+    st.markdown("Calcular IVI baseado nos parâmetros atuais do sistema com a nova fórmula")
     
     # Cálculo automático de IVI com parâmetros atuais
     st.markdown("---")
@@ -2259,13 +2270,13 @@ def mostrar_pagina_configuracoes(detector):
             col1, col2 = st.columns(2)
             
             with col1:
-                st.markdown("##### 📐 Fórmulas Utilizadas")
+                st.markdown("##### 📐 Fórmulas Utilizadas (Atualizadas)")
                 st.markdown("""
                 **Equação 3 - IPRL:**  
                 `IPRL = Vp / (Nc × 365)`
                 
-                **Equação 4 - IPRI:**  
-                `IPRI = (18 × Lm + 0,8 × Nc + 25 × Lp) × P / Nc`
+                **Equação 4 - IPRI (Nova Fórmula):**  
+                `IPRI = (18 × Lm + 0,8 × Nc + 25 × Lp × Nc) × P / (Nc × 1000)`
                 
                 **Equação 5 - IVI:**  
                 `IVI = IPRL / IPRI`
@@ -2278,18 +2289,18 @@ def mostrar_pagina_configuracoes(detector):
                 st.text(f"Lp (Distância lote-medidor): {resultados['distancia_lote_medidor']} km")
                 st.text(f"P (Pressão de operação): {resultados['pressao_operacao']} mca")
                 
-                st.markdown("##### ⚙️ Coeficientes IPRI")
-                st.text(f"C₁ (Coef. rede): {resultados['coeficiente_rede']}")
-                st.text(f"C₂ (Coef. ligações): {resultados['coeficiente_ligacoes']}")
-                st.text(f"C₃ (Coef. ramais): {resultados['coeficiente_ramais']}")
+                st.markdown("##### ⚙️ Coeficientes IPRI (Fixos na Nova Fórmula)")
+                st.text(f"C₁ (Coef. rede): {resultados['coeficiente_rede']} (fixo)")
+                st.text(f"C₂ (Coef. ligações): {resultados['coeficiente_ligacoes']} (fixo)")
+                st.text(f"C₃ (Coef. ramais): {resultados['coeficiente_ramais']} (fixo)")
             
             with col2:
-                st.markdown("##### 🧮 Cálculos Detalhados")
+                st.markdown("##### 🧮 Cálculos Detalhados (Nova Fórmula)")
                 st.markdown(f"""
                 **IPRL Calculation:**  
                 {resultados['calculo_iprl']}
                 
-                **IPRI Calculation:**  
+                **IPRI Calculation (Nova Fórmula):**  
                 {resultados['calculo_ipri']}
                 
                 **IVI Calculation:**  
@@ -2298,8 +2309,11 @@ def mostrar_pagina_configuracoes(detector):
                 
                 st.markdown("##### 📈 Resultados Finais")
                 st.metric("IPRL", f"{resultados['iprl']:.3f} m³/lig.dia", "Perdas Reais por Ligação")
-                st.metric("IPRI", f"{resultados['ipri']:.3f} m³/lig.dia", "Perdas Reais Inevitáveis")
+                st.metric("IPRI", f"{resultados['ipri']:.6f} m³/lig.dia", "Perdas Reais Inevitáveis")
                 st.metric("IVI", f"{resultados['ivi']:.2f}", "Índice de Vazamentos da Infraestrutura")
+                
+                # Destacar que está usando nova fórmula
+                st.info("💡 **Cálculo realizado com a nova fórmula IPRI**")
             
             # Classificação do IVI
             st.markdown("---")
@@ -2329,6 +2343,9 @@ def mostrar_pagina_configuracoes(detector):
             
             O sistema Coleipa apresenta IVI = {ivi:.2f}, indicando que as perdas reais são 
             {ivi:.2f} vezes maiores que as perdas inevitáveis, caracterizando uso muito ineficiente dos recursos.
+            
+            **Nota:** Com a nova fórmula IPRI, o resultado pode diferir ligeiramente do valor original 
+            devido às mudanças nos coeficientes e estrutura da equação.
             """)
     
     # Opções avançadas
@@ -2439,7 +2456,7 @@ def mostrar_pagina_configuracoes(detector):
     
     with col1:
         if st.button("🔄 Carregar Preset Coleipa", use_container_width=True):
-            # Valores originais de Coleipa
+            # Valores originais de Coleipa com nova fórmula
             preset_coleipa = {
                 'area_territorial': 319000,
                 'populacao': 1200,
@@ -2454,12 +2471,12 @@ def mostrar_pagina_configuracoes(detector):
                 'volume_perdido_anual': 37547.55,
                 'distancia_lote_medidor': 0.001,
                 'pressao_operacao_adequada': 20.0,
-                'coeficiente_rede': 8.0,
+                'coeficiente_rede': 18.0,      # Novo valor
                 'coeficiente_ligacoes': 0.8,
                 'coeficiente_ramais': 25.0
             }
             detector.atualizar_caracteristicas_sistema(preset_coleipa)
-            st.success("Preset Coleipa carregado!")
+            st.success("Preset Coleipa carregado com nova fórmula!")
     
     with col2:
         if st.button("📋 Exportar Configuração Atual", use_container_width=True):

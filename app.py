@@ -32,7 +32,7 @@ class DetectorVazamentosColeipa:
         Parâmetros:
         arquivo_dados (str): Caminho para arquivo Excel ou CSV contendo dados de monitoramento
         """
-        # Características padrão do sistema
+        # Características padrão do sistema baseadas no cálculo das imagens
         self.caracteristicas_sistema = {
             'area_territorial': 319000,  # m² (int)
             'populacao': 1200,  # habitantes (int)
@@ -41,12 +41,19 @@ class DetectorVazamentosColeipa:
             'densidade_ramais': 100,  # ramais/km (int)
             'vazao_media_normal': 3.17,  # l/s (float)
             'pressao_media_normal': 5.22,  # mca (float)
-            'perdas_reais_media': 102.87,  # m³/dia (float)
+            'perdas_reais_media': 102.87,  # m³/dia (float) - 37547.55/365
             'volume_consumido_medio': 128.29,  # m³/dia (float)
             'percentual_perdas': 44.50,  # % (float)
-            'iprl': 0.343,  # m³/ligação.dia (float)
-            'ipri': 0.021,  # m³/ligação.dia (float)
-            'ivi': 16.33  # Índice de Vazamentos da Infraestrutura (float)
+            'iprl': 0.343,  # m³/ligação.dia (float) - conforme imagem
+            'ipri': 0.021,  # m³/ligação.dia (float) - conforme imagem
+            'ivi': 16.33,  # Índice de Vazamentos da Infraestrutura (float) - resultado correto
+            # Parâmetros para cálculo de IVI (parametrizáveis)
+            'volume_perdido_anual': 37547.55,  # Vp - Volume perdido anual (m³/ano)
+            'distancia_lote_medidor': 0.001,  # Lp - Distância entre limite do lote e medidor (km)
+            'pressao_operacao_adequada': 20.0,  # P - Pressão média de operação adequada (mca)
+            'coeficiente_rede': 8.0,  # Coeficiente para comprimento da rede na fórmula IPRI
+            'coeficiente_ligacoes': 0.8,  # Coeficiente para número de ligações na fórmula IPRI
+            'coeficiente_ramais': 25.0  # Coeficiente para distância dos ramais na fórmula IPRI
         }
         
         # Dados padrão codificados (usados apenas se nenhum arquivo for fornecido)
@@ -406,126 +413,44 @@ class DetectorVazamentosColeipa:
     def calcular_ivi_automatico(self, arquivo_uploaded=None):
         """
         Calcula automaticamente o IVI (Índice de Vazamentos da Infraestrutura) 
-        a partir dos dados de vazão e pressão
+        usando parâmetros configuráveis do sistema
         
         Parâmetros:
         arquivo_uploaded: Arquivo opcional com dados adicionais para cálculo do IVI
         
         Retorna:
         float: Valor do IVI calculado
-        dict: Dicionário com componentes do cálculo (CARL, UARL, etc.)
+        dict: Dicionário com componentes do cálculo (IPRL, IPRI, etc.)
         """
-        # Criar dataframe com dados de monitoramento
-        df_monitoramento = self.criar_dataframe_coleipa()
+        # Usar parâmetros configuráveis do sistema
+        Vp_anual = self.caracteristicas_sistema['volume_perdido_anual']  # Volume perdido anual (m³/ano)
+        Nc = self.caracteristicas_sistema['numero_ligacoes']  # Número de ligações
+        Lm = self.caracteristicas_sistema['comprimento_rede']  # Comprimento da rede (km) 
+        Lp = self.caracteristicas_sistema['distancia_lote_medidor']  # Distância lote-medidor (km)
+        P = self.caracteristicas_sistema['pressao_operacao_adequada']  # Pressão adequada (mca)
         
-        if df_monitoramento.empty:
-            st.error("Não foi possível calcular o IVI. Dados de monitoramento insuficientes.")
-            return self.caracteristicas_sistema['ivi'], {}
+        # Coeficientes da fórmula IPRI (parametrizáveis)
+        coef_rede = self.caracteristicas_sistema['coeficiente_rede']  # Padrão: 8 (corrigido conforme imagem)
+        coef_ligacoes = self.caracteristicas_sistema['coeficiente_ligacoes']  # Padrão: 0.8
+        coef_ramais = self.caracteristicas_sistema['coeficiente_ramais']  # Padrão: 25
         
-        # Extrair parâmetros do sistema
-        comprimento_rede = self.caracteristicas_sistema['comprimento_rede']  # km
-        numero_ligacoes = self.caracteristicas_sistema['numero_ligacoes']    # ligações
-        pressao_media = df_monitoramento['Pressao_Media'].mean()            # mca
+        # Cálculo do IPRL (Índice de Perdas Reais por Ligação) - Equação 3
+        # IPRL = Vp / (Nc × 365)
+        iprl = Vp_anual / (Nc * 365) if Nc > 0 else 0  # m³/lig.dia
         
-        # Calcular vazão mínima noturna (média das horas 1-4)
-        horas_noturnas = df_monitoramento[(df_monitoramento['Hora'] >= 1) & (df_monitoramento['Hora'] <= 4)]
-        if horas_noturnas.empty:
-            vazao_minima_noturna = df_monitoramento['Vazao_Media'].min()
-        else:
-            vazao_minima_noturna = horas_noturnas['Vazao_Media'].mean()  # m³/h
+        # Cálculo do IPRI (Índice de Perdas Reais Inevitáveis) - Equação 4  
+        # IPRI = (coef_rede × Lm + coef_ligacoes × Nc + coef_ramais × Lp) × P / Nc
+        ipri = (coef_rede * Lm + coef_ligacoes * Nc + coef_ramais * Lp) * P / Nc if Nc > 0 else 0  # m³/lig.dia
         
-        # Tentar carregar dados adicionais do arquivo se fornecido
-        dados_adicionais = {}
-        if arquivo_uploaded:
-            try:
-                # Determinar tipo de arquivo pela extensão
-                nome_arquivo = arquivo_uploaded.name
-                nome, extensao = os.path.splitext(nome_arquivo)
-                extensao = extensao.lower()
-                
-                if extensao == '.xlsx' or extensao == '.xls':
-                    df_ivi = pd.read_excel(arquivo_uploaded, sheet_name='Calculo_IVI')
-                    st.success("Dados para cálculo de IVI carregados com sucesso")
-                elif extensao == '.csv':
-                    df_ivi = pd.read_csv(arquivo_uploaded)
-                    st.success("Dados para cálculo de IVI carregados com sucesso")
-                else:
-                    st.warning(f"Formato não suportado para cálculo automático de IVI: {extensao}")
-                    df_ivi = None
-                
-                # Se conseguimos carregar o arquivo, extrair dados relevantes
-                if df_ivi is not None:
-                    # Procurar por colunas específicas no arquivo
-                    colunas_esperadas = ['volume_diario', 'consumo_autorizado', 'perdas_aparentes']
-                    if all(col in df_ivi.columns for col in colunas_esperadas):
-                        dados_adicionais = {
-                            'volume_diario': df_ivi['volume_diario'].mean(),
-                            'consumo_autorizado': df_ivi['consumo_autorizado'].mean(),
-                            'perdas_aparentes': df_ivi['perdas_aparentes'].mean()
-                        }
-                        st.success("Dados adicionais para cálculo de IVI encontrados!")
-                    else:
-                        st.info("Formato de arquivo reconhecido, mas colunas necessárias não encontradas.")
-                        st.info("Usando método alternativo para cálculo de IVI.")
-                        
-            except Exception as e:
-                st.warning(f"Erro ao processar arquivo para cálculo de IVI: {e}")
-                st.info("Usando método alternativo para cálculo de IVI.")
-        
-        # Método 1: Se temos dados completos do arquivo
-        if all(key in dados_adicionais for key in ['volume_diario', 'consumo_autorizado', 'perdas_aparentes']):
-            # Calcular perdas reais (CARL) em m³/dia
-            volume_diario = dados_adicionais['volume_diario']  # m³/dia
-            consumo_autorizado = dados_adicionais['consumo_autorizado']  # m³/dia
-            perdas_aparentes = dados_adicionais['perdas_aparentes']  # m³/dia
-            
-            perdas_reais = volume_diario - consumo_autorizado - perdas_aparentes  # m³/dia
-            
-        # Método 2: Baseado na vazão mínima noturna e estimativas
-        else:
-            # Estimar consumo noturno legítimo (tipicamente 6-8% do consumo diário)
-            consumo_noturno_perc = 0.07  # 7% é um valor típico
-            consumo_legitimo_noturno = vazao_minima_noturna * consumo_noturno_perc  # m³/h
-            
-            # Estimar vazamento noturno
-            vazamento_noturno = vazao_minima_noturna - consumo_legitimo_noturno  # m³/h
-            
-            # Converter para volume diário (fator N1 da metodologia FAVAD)
-            # Fator N1 relaciona variação de vazamento com pressão
-            fator_n1 = 1.15  # Valor típico entre 0.5 e 1.5
-            fator_dia_noite = 24 * ((pressao_media / pressao_media) ** fator_n1)
-            
-            # Calcular perdas reais diárias
-            perdas_reais = vazamento_noturno * fator_dia_noite  # m³/dia
-        
-        # Calcular UARL (Unavoidable Annual Real Losses) usando fórmula padrão IWA
-        # UARL (litros/dia) = (18 × Lm + 0.8 × Nc + 25 × Lp) × P
-        # Onde:
-        # Lm = comprimento da rede (km)
-        # Nc = número de ligações
-        # Lp = comprimento total dos ramais (km) - estimado como Nc/densidade_ligacoes
-        # P = pressão média (mca)
-        
-        densidade_ramais = self.caracteristicas_sistema['densidade_ramais']
-        comprimento_ramais = numero_ligacoes / densidade_ramais  # km
-        
-        # Cálculo UARL em litros/dia
-        uarl_litros_dia = (18 * comprimento_rede + 0.8 * numero_ligacoes + 25 * comprimento_ramais) * pressao_media
-        
-        # Converter para m³/dia
-        uarl_m3_dia = uarl_litros_dia / 1000
-        
-        # Calcular IPRL (Índice de Perdas Reais por Ligação)
-        iprl = perdas_reais / numero_ligacoes if numero_ligacoes > 0 else 0  # m³/ligação.dia
-        
-        # Calcular IPRI (Índice de Perdas Reais Inevitáveis)
-        ipri = uarl_m3_dia / numero_ligacoes if numero_ligacoes > 0 else 0  # m³/ligação.dia
-        
-        # Finalmente, calcular IVI
+        # Cálculo do IVI (Índice de Vazamentos na Infraestrutura) - Equação 5
+        # IVI = IPRL / IPRI
         ivi = iprl / ipri if ipri > 0 else 0
         
+        # Calcular perdas reais diárias para compatibilidade
+        perdas_reais_diarias = Vp_anual / 365  # m³/dia
+        
         # Atualizar características do sistema com tipos corretos
-        self.caracteristicas_sistema['perdas_reais_media'] = float(perdas_reais)
+        self.caracteristicas_sistema['perdas_reais_media'] = float(perdas_reais_diarias)
         self.caracteristicas_sistema['iprl'] = float(iprl)
         self.caracteristicas_sistema['ipri'] = float(ipri)
         self.caracteristicas_sistema['ivi'] = float(ivi)
@@ -535,13 +460,21 @@ class DetectorVazamentosColeipa:
         
         # Preparar resultados detalhados
         resultados = {
-            'vazao_minima_noturna': vazao_minima_noturna,
-            'pressao_media': pressao_media,
-            'perdas_reais': perdas_reais,
-            'uarl_m3_dia': uarl_m3_dia,
+            'volume_perdido_anual': Vp_anual,
+            'numero_ligacoes': Nc,
+            'comprimento_rede': Lm,
+            'distancia_lote_medidor': Lp,
+            'pressao_operacao': P,
+            'coeficiente_rede': coef_rede,
+            'coeficiente_ligacoes': coef_ligacoes,
+            'coeficiente_ramais': coef_ramais,
+            'perdas_reais_diarias': perdas_reais_diarias,
             'iprl': iprl,
             'ipri': ipri,
-            'ivi': ivi
+            'ivi': ivi,
+            'calculo_iprl': f"{Vp_anual:.2f} / ({Nc} × 365) = {iprl:.3f} m³/lig.dia",
+            'calculo_ipri': f"({coef_rede} × {Lm} + {coef_ligacoes} × {Nc} + {coef_ramais} × {Lp}) × {P} / {Nc} = {ipri:.3f} m³/lig.dia",
+            'calculo_ivi': f"{iprl:.3f} / {ipri:.3f} = {ivi:.2f}"
         }
         
         return ivi, resultados
@@ -1074,7 +1007,14 @@ class DetectorVazamentosColeipa:
             'percentual_perdas': float,
             'iprl': float,
             'ipri': float,
-            'ivi': float
+            'ivi': float,
+            # Novos parâmetros para cálculo de IVI
+            'volume_perdido_anual': float,
+            'distancia_lote_medidor': float,
+            'pressao_operacao_adequada': float,
+            'coeficiente_rede': float,
+            'coeficiente_ligacoes': float,
+            'coeficiente_ramais': float
         }
         
         for chave, valor in novas_caracteristicas.items():
@@ -2069,11 +2009,151 @@ def mostrar_pagina_configuracoes(detector):
         
         detector.atualizar_caracteristicas_sistema(novas_caracteristicas)
         st.success("Características do sistema atualizadas com sucesso!")
+        
+        # Sugerir recálculo do IVI se parâmetros relacionados foram alterados
+        parametros_ivi_relacionados = ['numero_ligacoes', 'comprimento_rede']
+        if any(param in novas_caracteristicas for param in parametros_ivi_relacionados):
+            st.info("💡 Parâmetros relacionados ao IVI foram alterados. Considere recalcular o IVI na seção específica abaixo.")
     
     # Cálculo de IVI
     st.markdown("---")
+    st.subheader("Parâmetros para Cálculo de IVI")
+    st.markdown("Configure os parâmetros específicos para o cálculo do Índice de Vazamentos da Infraestrutura")
+    
+    # Criar seção expansível para parâmetros de IVI
+    with st.expander("📊 Configurar Parâmetros do Cálculo de IVI", expanded=False):
+        st.info("💡 **Dica:** Estes parâmetros são baseados no estudo de caso do sistema Coleipa. Ajuste-os conforme as características do seu sistema.")
+        
+        st.markdown("##### Parâmetros Principais")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            volume_perdido_anual = st.number_input("Volume Perdido Anual (Vp) [m³/ano]", 
+                                                   value=float(detector.caracteristicas_sistema['volume_perdido_anual']),
+                                                   step=100.0,
+                                                   min_value=0.0,
+                                                   help="Volume total de água perdido por ano")
+            
+            distancia_lote_medidor = st.number_input("Distância Lote-Medidor (Lp) [km]", 
+                                                     value=float(detector.caracteristicas_sistema['distancia_lote_medidor']),
+                                                     step=0.001,
+                                                     min_value=0.0,
+                                                     format="%.3f",
+                                                     help="Distância média entre limite do lote e medidor hidrômetro")
+            
+            pressao_operacao_adequada = st.number_input("Pressão de Operação Adequada (P) [mca]", 
+                                                        value=float(detector.caracteristicas_sistema['pressao_operacao_adequada']),
+                                                        step=1.0,
+                                                        min_value=0.0,
+                                                        help="Pressão média de operação adequada do sistema")
+        
+        with col2:
+            st.markdown("##### Coeficientes da Fórmula IPRI")
+            st.markdown("*IPRI = (C₁×Lm + C₂×Nc + C₃×Lp) × P / Nc*")
+            
+            coeficiente_rede = st.number_input("Coeficiente da Rede (C₁)", 
+                                               value=float(detector.caracteristicas_sistema['coeficiente_rede']),
+                                               step=0.1,
+                                               min_value=0.0,
+                                               help="Coeficiente para comprimento da rede (padrão: 8)")
+            
+            coeficiente_ligacoes = st.number_input("Coeficiente das Ligações (C₂)", 
+                                                   value=float(detector.caracteristicas_sistema['coeficiente_ligacoes']),
+                                                   step=0.1,
+                                                   min_value=0.0,
+                                                   help="Coeficiente para número de ligações (padrão: 0.8)")
+            
+            coeficiente_ramais = st.number_input("Coeficiente dos Ramais (C₃)", 
+                                                 value=float(detector.caracteristicas_sistema['coeficiente_ramais']),
+                                                 step=1.0,
+                                                 min_value=0.0,
+                                                 help="Coeficiente para distância dos ramais (padrão: 25)")
+        
+        # Botão para atualizar parâmetros de IVI
+        if st.button("Atualizar Parâmetros de IVI"):
+            novos_parametros_ivi = {
+                'volume_perdido_anual': float(volume_perdido_anual),
+                'distancia_lote_medidor': float(distancia_lote_medidor),
+                'pressao_operacao_adequada': float(pressao_operacao_adequada),
+                'coeficiente_rede': float(coeficiente_rede),
+                'coeficiente_ligacoes': float(coeficiente_ligacoes),
+                'coeficiente_ramais': float(coeficiente_ramais)
+            }
+            
+            detector.atualizar_caracteristicas_sistema(novos_parametros_ivi)
+            st.success("Parâmetros de IVI atualizados com sucesso!")
+            
+            # Recalcular IVI automaticamente
+            with st.spinner("Recalculando IVI com novos parâmetros..."):
+                ivi_novo, resultados_novo = detector.calcular_ivi_automatico()
+                st.info(f"Novo IVI calculado: {ivi_novo:.2f}")
+        
+        # Mostrar fórmulas de referência
+        st.markdown("---")
+        st.markdown("##### 📐 Fórmulas de Referência")
+        st.markdown("""
+        **Equação 3 - IPRL (Índice de Perdas Reais por Ligação):**  
+        `IPRL = Vp / (Nc × 365)`
+        
+        **Equação 4 - IPRI (Índice de Perdas Reais Inevitáveis):**  
+        `IPRI = (C₁ × Lm + C₂ × Nc + C₃ × Lp) × P / Nc`
+        
+        **Equação 5 - IVI (Índice de Vazamentos na Infraestrutura):**  
+        `IVI = IPRL / IPRI`
+        
+        **Onde:**
+        - Vp = Volume perdido anual (m³/ano)
+        - Nc = Número de ligações
+        - Lm = Comprimento da rede (km)
+        - Lp = Distância lote-medidor (km)
+        - P = Pressão de operação adequada (mca)
+        - C₁, C₂, C₃ = Coeficientes da fórmula IPRI
+        """)
+        
+        # Seção de ajuda
+        st.markdown("---")
+        st.markdown("##### 💡 Ajuda - Como Configurar os Parâmetros")
+        
+        with st.expander("📖 Guia de Configuração dos Parâmetros"):
+            st.markdown("""
+            **Como obter os valores para seu sistema:**
+            
+            1. **Volume Perdido Anual (Vp):**
+               - Calcule: Volume Distribuído - Volume Consumido - Perdas Aparentes
+               - Unidade: m³/ano
+               - Use dados de 12 meses para maior precisão
+            
+            2. **Distância Lote-Medidor (Lp):**
+               - Distância média entre o limite do lote e o medidor
+               - Geralmente entre 0.001 km (1m) e 0.010 km (10m)
+               - Para sistemas urbanos: ~0.001 km
+               - Para sistemas rurais: pode ser maior
+            
+            3. **Pressão de Operação Adequada (P):**
+               - Pressão média que o sistema deveria operar idealmente
+               - NBR 12218: mínimo 10 mca, recomendado 15-50 mca
+               - Use a pressão média planejada/projetada, não a atual
+            
+            4. **Coeficientes da Fórmula IPRI:**
+               - **C₁ (Rede):** Padrão = 8 (pode variar de 6-18 conforme literatura)
+               - **C₂ (Ligações):** Padrão = 0.8 (pode variar de 0.5-1.5)
+               - **C₃ (Ramais):** Padrão = 25 (pode variar de 20-50)
+               - Use valores padrão se não tiver dados específicos
+            
+            **Valores de Referência (Sistema Coleipa):**
+            - Volume Perdido: 37.547,55 m³/ano
+            - Distância Lote-Medidor: 0,001 km
+            - Pressão Operação: 20 mca
+            - Coeficientes: 8 / 0.8 / 25
+            
+            **Resultado Esperado:** IVI = 16,33 (Categoria D - Muito Ruim)
+            """)
+    
+    # Cálculo automático de IVI com parâmetros atuais
+    st.markdown("---")
     st.subheader("Cálculo Automático de IVI")
-    st.markdown("Calcular IVI baseado nos dados e parâmetros atuais")
+    st.markdown("Calcular IVI baseado nos parâmetros atuais do sistema")
     
     if st.button("Calcular IVI"):
         with st.spinner("Calculando IVI..."):
@@ -2081,19 +2161,84 @@ def mostrar_pagina_configuracoes(detector):
             
             st.success(f"IVI calculado com sucesso: {ivi:.2f}")
             
-            # Exibir resultados detalhados
-            st.subheader("Detalhes do Cálculo")
+            # Exibir resultados detalhados conforme as imagens
+            st.subheader("Detalhes do Cálculo - Conforme Documentação")
+            
+            # Mostrar fórmulas e cálculos
             col1, col2 = st.columns(2)
             
             with col1:
-                st.metric("Vazão Mínima Noturna", f"{resultados['vazao_minima_noturna']:.2f} m³/h")
-                st.metric("Pressão Média", f"{resultados['pressao_media']:.2f} mca")
-                st.metric("Perdas Reais", f"{resultados['perdas_reais']:.2f} m³/dia")
+                st.markdown("##### 📐 Fórmulas Utilizadas")
+                st.markdown("""
+                **Equação 3 - IPRL:**  
+                `IPRL = Vp / (Nc × 365)`
                 
+                **Equação 4 - IPRI:**  
+                `IPRI = (18 × Lm + 0,8 × Nc + 25 × Lp) × P / Nc`
+                
+                **Equação 5 - IVI:**  
+                `IVI = IPRL / IPRI`
+                """)
+                
+                st.markdown("##### 📊 Parâmetros do Sistema")
+                st.text(f"Vp (Volume perdido anual): {resultados['volume_perdido_anual']:.2f} m³/ano")
+                st.text(f"Nc (Número de ligações): {resultados['numero_ligacoes']}")
+                st.text(f"Lm (Comprimento da rede): {resultados['comprimento_rede']} km")
+                st.text(f"Lp (Distância lote-medidor): {resultados['distancia_lote_medidor']} km")
+                st.text(f"P (Pressão de operação): {resultados['pressao_operacao']} mca")
+                
+                st.markdown("##### ⚙️ Coeficientes IPRI")
+                st.text(f"C₁ (Coef. rede): {resultados['coeficiente_rede']}")
+                st.text(f"C₂ (Coef. ligações): {resultados['coeficiente_ligacoes']}")
+                st.text(f"C₃ (Coef. ramais): {resultados['coeficiente_ramais']}")
+            
             with col2:
-                st.metric("UARL", f"{resultados['uarl_m3_dia']:.2f} m³/dia", "Perdas Reais Anuais Inevitáveis")
+                st.markdown("##### 🧮 Cálculos Detalhados")
+                st.markdown(f"""
+                **IPRL Calculation:**  
+                {resultados['calculo_iprl']}
+                
+                **IPRI Calculation:**  
+                {resultados['calculo_ipri']}
+                
+                **IVI Calculation:**  
+                {resultados['calculo_ivi']}
+                """)
+                
+                st.markdown("##### 📈 Resultados Finais")
                 st.metric("IPRL", f"{resultados['iprl']:.3f} m³/lig.dia", "Perdas Reais por Ligação")
-                st.metric("IPRI", f"{resultados['ipri']:.3f} m³/lig.dia", "Perdas Reais Inevitáveis por Ligação")
+                st.metric("IPRI", f"{resultados['ipri']:.3f} m³/lig.dia", "Perdas Reais Inevitáveis")
+                st.metric("IVI", f"{resultados['ivi']:.2f}", "Índice de Vazamentos da Infraestrutura")
+            
+            # Classificação do IVI
+            st.markdown("---")
+            st.subheader("Classificação do IVI (Banco Mundial)")
+            
+            if ivi <= 4:
+                categoria = "A - Eficiente"
+                cor = "🟢"
+                interpretacao = "Sistema eficiente com perdas próximas às inevitáveis"
+            elif ivi <= 8:
+                categoria = "B - Regular"
+                cor = "🟡"
+                interpretacao = "Sistema regular, melhorias recomendadas"
+            elif ivi <= 16:
+                categoria = "C - Ruim"
+                cor = "🟠"
+                interpretacao = "Sistema ruim, ações urgentes necessárias"
+            else:
+                categoria = "D - Muito Ruim"
+                cor = "🔴"
+                interpretacao = "Sistema muito ruim, intervenção imediata necessária"
+            
+            st.markdown(f"""
+            ### {cor} Categoria {categoria}
+            **IVI: {ivi:.2f}**  
+            *{interpretacao}*
+            
+            O sistema Coleipa apresenta IVI = {ivi:.2f}, indicando que as perdas reais são 
+            {ivi:.2f} vezes maiores que as perdas inevitáveis, caracterizando uso muito ineficiente dos recursos.
+            """)
     
     # Opções avançadas
     st.markdown("---")
@@ -2194,8 +2339,105 @@ def mostrar_pagina_configuracoes(detector):
                 st.text(f"MÉDIA: {pressao_media_faixa}")
                 st.text(f"ALTA: {pressao_alta_faixa}")
     
+    # Presets de configuração
+    st.markdown("---")
+    st.subheader("Presets de Configuração")
+    st.markdown("Salve e carregue configurações predefinidas para diferentes sistemas")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        if st.button("🔄 Carregar Preset Coleipa", use_container_width=True):
+            # Valores originais de Coleipa
+            preset_coleipa = {
+                'area_territorial': 319000,
+                'populacao': 1200,
+                'numero_ligacoes': 300,
+                'comprimento_rede': 3.0,
+                'densidade_ramais': 100,
+                'vazao_media_normal': 3.17,
+                'pressao_media_normal': 5.22,
+                'perdas_reais_media': 102.87,
+                'volume_consumido_medio': 128.29,
+                'percentual_perdas': 44.50,
+                'volume_perdido_anual': 37547.55,
+                'distancia_lote_medidor': 0.001,
+                'pressao_operacao_adequada': 20.0,
+                'coeficiente_rede': 8.0,
+                'coeficiente_ligacoes': 0.8,
+                'coeficiente_ramais': 25.0
+            }
+            detector.atualizar_caracteristicas_sistema(preset_coleipa)
+            st.success("Preset Coleipa carregado!")
+    
+    with col2:
+        if st.button("📋 Exportar Configuração Atual", use_container_width=True):
+            # Criar DataFrame com configuração atual
+            config_atual = pd.DataFrame.from_dict(detector.caracteristicas_sistema, orient='index', columns=['Valor'])
+            config_atual.index.name = 'Parâmetro'
+            
+            # Gerar download
+            buffer = io.BytesIO()
+            config_atual.to_excel(buffer, index=True)
+            buffer.seek(0)
+            
+            st.download_button(
+                label="⬇️ Baixar Configuração (Excel)",
+                data=buffer,
+                file_name=f"configuracao_sistema_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                mime="application/vnd.ms-excel",
+                use_container_width=True
+            )
+    
+    with col3:
+        arquivo_config = st.file_uploader("📂 Importar Configuração", type=["xlsx", "csv"], key="config_upload")
+        if arquivo_config and st.button("🔼 Carregar Configuração", use_container_width=True):
+            try:
+                if arquivo_config.name.endswith('.xlsx'):
+                    df_config = pd.read_excel(arquivo_config, index_col=0)
+                else:
+                    df_config = pd.read_csv(arquivo_config, index_col=0)
+                
+                # Converter para dicionário
+                nova_config = df_config['Valor'].to_dict()
+                
+                # Atualizar sistema
+                detector.atualizar_caracteristicas_sistema(nova_config)
+                st.success("Configuração importada com sucesso!")
+                
+            except Exception as e:
+                st.error(f"Erro ao importar configuração: {e}")
+    
+    # Resumo da configuração atual
+    st.markdown("---")
+    st.subheader("Resumo da Configuração Atual")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.markdown("##### 🏗️ Sistema")
+        st.text(f"População: {detector.caracteristicas_sistema['populacao']:,}")
+        st.text(f"Ligações: {detector.caracteristicas_sistema['numero_ligacoes']:,}")
+        st.text(f"Rede: {detector.caracteristicas_sistema['comprimento_rede']:.1f} km")
+        st.text(f"Área: {detector.caracteristicas_sistema['area_territorial']/1000:.1f} km²")
+    
+    with col2:
+        st.markdown("##### 📊 IVI")
+        st.text(f"IVI Atual: {detector.caracteristicas_sistema['ivi']:.2f}")
+        st.text(f"IPRL: {detector.caracteristicas_sistema['iprl']:.3f}")
+        st.text(f"IPRI: {detector.caracteristicas_sistema['ipri']:.3f}")
+        st.text(f"Volume Perdido: {detector.caracteristicas_sistema['volume_perdido_anual']:.0f} m³/ano")
+    
+    with col3:
+        st.markdown("##### ⚙️ Operação")
+        st.text(f"Vazão Média: {detector.caracteristicas_sistema['vazao_media_normal']:.2f} l/s")
+        st.text(f"Pressão Média: {detector.caracteristicas_sistema['pressao_media_normal']:.2f} mca")
+        st.text(f"Perdas: {detector.caracteristicas_sistema['percentual_perdas']:.1f}%")
+        st.text(f"Densidade Ramais: {detector.caracteristicas_sistema['densidade_ramais']} ramais/km")
+    
     # Resetar sistema para valores padrão
-    st.markdown("##### Resetar Sistema")
+    st.markdown("---")
+    st.markdown("##### ⚠️ Resetar Sistema")
     if st.button("Resetar Sistema para Valores Padrão", type="primary", use_container_width=True):
         # Limpar cache e criar um novo detector com valores padrão
         try:

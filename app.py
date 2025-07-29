@@ -34,19 +34,19 @@ class DetectorVazamentosColeipa:
         """
         # Características padrão do sistema
         self.caracteristicas_sistema = {
-            'area_territorial': 319000,  # m²
-            'populacao': 1200,  # habitantes
-            'numero_ligacoes': 300,  # ligações
-            'comprimento_rede': 3,  # km
-            'densidade_ramais': 100,  # ramais/km
-            'vazao_media_normal': 3.17,  # l/s (média de três dias)
-            'pressao_media_normal': 5.22,  # mca (média de três dias)
-            'perdas_reais_media': 102.87,  # m³/dia
-            'volume_consumido_medio': 128.29,  # m³/dia
-            'percentual_perdas': 44.50,  # %
-            'iprl': 0.343,  # m³/ligação.dia
-            'ipri': 0.021,  # m³/ligação.dia
-            'ivi': 16.33  # Índice de Vazamentos da Infraestrutura
+            'area_territorial': 319000,  # m² (int)
+            'populacao': 1200,  # habitantes (int)
+            'numero_ligacoes': 300,  # ligações (int)
+            'comprimento_rede': 3.0,  # km (float)
+            'densidade_ramais': 100,  # ramais/km (int)
+            'vazao_media_normal': 3.17,  # l/s (float)
+            'pressao_media_normal': 5.22,  # mca (float)
+            'perdas_reais_media': 102.87,  # m³/dia (float)
+            'volume_consumido_medio': 128.29,  # m³/dia (float)
+            'percentual_perdas': 44.50,  # % (float)
+            'iprl': 0.343,  # m³/ligação.dia (float)
+            'ipri': 0.021,  # m³/ligação.dia (float)
+            'ivi': 16.33  # Índice de Vazamentos da Infraestrutura (float)
         }
         
         # Dados padrão codificados (usados apenas se nenhum arquivo for fornecido)
@@ -524,11 +524,11 @@ class DetectorVazamentosColeipa:
         # Finalmente, calcular IVI
         ivi = iprl / ipri if ipri > 0 else 0
         
-        # Atualizar características do sistema
-        self.caracteristicas_sistema['perdas_reais_media'] = perdas_reais
-        self.caracteristicas_sistema['iprl'] = iprl
-        self.caracteristicas_sistema['ipri'] = ipri
-        self.caracteristicas_sistema['ivi'] = ivi
+        # Atualizar características do sistema com tipos corretos
+        self.caracteristicas_sistema['perdas_reais_media'] = float(perdas_reais)
+        self.caracteristicas_sistema['iprl'] = float(iprl)
+        self.caracteristicas_sistema['ipri'] = float(ipri)
+        self.caracteristicas_sistema['ivi'] = float(ivi)
         
         # Resetar sistema fuzzy para refletir o novo IVI
         self.sistema_fuzzy = None
@@ -1060,10 +1060,36 @@ class DetectorVazamentosColeipa:
         Parâmetros:
         novas_caracteristicas (dict): Dicionário com novas características
         """
+        # Definir tipos esperados para cada característica
+        tipos_esperados = {
+            'area_territorial': int,
+            'populacao': int,
+            'numero_ligacoes': int,
+            'comprimento_rede': float,
+            'densidade_ramais': int,
+            'vazao_media_normal': float,
+            'pressao_media_normal': float,
+            'perdas_reais_media': float,
+            'volume_consumido_medio': float,
+            'percentual_perdas': float,
+            'iprl': float,
+            'ipri': float,
+            'ivi': float
+        }
+        
         for chave, valor in novas_caracteristicas.items():
             if chave in self.caracteristicas_sistema:
-                self.caracteristicas_sistema[chave] = valor
-                st.success(f"Característica '{chave}' atualizada para: {valor}")
+                # Converter para o tipo correto
+                if chave in tipos_esperados:
+                    try:
+                        valor_convertido = tipos_esperados[chave](valor)
+                        self.caracteristicas_sistema[chave] = valor_convertido
+                        st.success(f"Característica '{chave}' atualizada para: {valor_convertido}")
+                    except (ValueError, TypeError) as e:
+                        st.error(f"Erro ao converter '{chave}': {e}")
+                else:
+                    self.caracteristicas_sistema[chave] = valor
+                    st.success(f"Característica '{chave}' atualizada para: {valor}")
             else:
                 st.warning(f"Aviso: Característica '{chave}' não existe no sistema")
         
@@ -1082,7 +1108,12 @@ st.set_page_config(
 # Variável global para armazenar instância do detector
 @st.cache_resource
 def obter_detector(arquivo_uploaded=None):
-    return DetectorVazamentosColeipa(arquivo_uploaded)
+    try:
+        return DetectorVazamentosColeipa(arquivo_uploaded)
+    except Exception as e:
+        st.error(f"Erro ao inicializar detector: {e}")
+        # Retornar detector com dados padrão em caso de erro
+        return DetectorVazamentosColeipa()
 
 # Função para download de arquivos
 def botao_download(objeto_para_download, nome_arquivo_download, texto_botao):
@@ -1355,7 +1386,7 @@ def mostrar_pagina_fuzzy(detector):
         pressao_teste = st.slider("Pressão (mca)", 0.0, 10.0, 3.5, 0.1)
     
     with col3:
-        ivi_teste = st.slider("IVI", 1.0, 25.0, detector.caracteristicas_sistema['ivi'], 0.01)
+        ivi_teste = st.slider("IVI", 1.0, 25.0, float(detector.caracteristicas_sistema['ivi']), 0.01)
     
     if st.button("Calcular Risco Fuzzy"):
         with st.spinner("Calculando risco..."):
@@ -2024,16 +2055,16 @@ def mostrar_pagina_configuracoes(detector):
     # Botão para atualizar características
     if st.button("Atualizar Características do Sistema"):
         novas_caracteristicas = {
-            'area_territorial': area_territorial,
-            'populacao': populacao,
-            'numero_ligacoes': numero_ligacoes,
-            'comprimento_rede': comprimento_rede,
-            'densidade_ramais': densidade_ramais,
-            'vazao_media_normal': vazao_media_normal,
-            'pressao_media_normal': pressao_media_normal,
-            'perdas_reais_media': perdas_reais_media,
-            'volume_consumido_medio': volume_consumido_medio,
-            'percentual_perdas': percentual_perdas
+            'area_territorial': int(area_territorial),
+            'populacao': int(populacao),
+            'numero_ligacoes': int(numero_ligacoes),
+            'comprimento_rede': float(comprimento_rede),
+            'densidade_ramais': int(densidade_ramais),
+            'vazao_media_normal': float(vazao_media_normal),
+            'pressao_media_normal': float(pressao_media_normal),
+            'perdas_reais_media': float(perdas_reais_media),
+            'volume_consumido_medio': float(volume_consumido_medio),
+            'percentual_perdas': float(percentual_perdas)
         }
         
         detector.atualizar_caracteristicas_sistema(novas_caracteristicas)
@@ -2072,66 +2103,107 @@ def mostrar_pagina_configuracoes(detector):
     st.markdown("##### Configuração do Sistema Fuzzy")
     
     with st.expander("Configurar Parâmetros do Sistema Fuzzy"):
+        st.info("Configure os pontos centrais dos conjuntos fuzzy. As faixas serão calculadas automaticamente.")
+        
         # Parâmetros de vazão
         st.markdown("**Parâmetros de Vazão (m³/h)**")
-        vazao_baixa = st.slider("Vazão BAIXA", 5.0, 10.0, 
-                               (detector.param_vazao['BAIXA']['faixa'][0], 
-                                detector.param_vazao['BAIXA']['faixa'][2]),
-                               0.1)
+        col1, col2, col3 = st.columns(3)
         
-        vazao_normal = st.slider("Vazão NORMAL", 8.0, 15.0, 
-                                (detector.param_vazao['NORMAL']['faixa'][0],
-                                 detector.param_vazao['NORMAL']['faixa'][2]),
-                                0.1)
+        with col1:
+            vazao_baixa_centro = st.number_input("Centro Vazão BAIXA", 
+                                                min_value=5.0, max_value=12.0, 
+                                                value=float(detector.param_vazao['BAIXA']['faixa'][1]), 
+                                                step=0.1)
         
-        vazao_alta = st.slider("Vazão ALTA", 12.0, 18.0, 
-                              (detector.param_vazao['ALTA']['faixa'][0],
-                               detector.param_vazao['ALTA']['faixa'][2]),
-                              0.1)
+        with col2:
+            vazao_normal_centro = st.number_input("Centro Vazão NORMAL", 
+                                                 min_value=8.0, max_value=15.0, 
+                                                 value=float(detector.param_vazao['NORMAL']['faixa'][1]), 
+                                                 step=0.1)
+        
+        with col3:
+            vazao_alta_centro = st.number_input("Centro Vazão ALTA", 
+                                               min_value=12.0, max_value=18.0, 
+                                               value=float(detector.param_vazao['ALTA']['faixa'][1]), 
+                                               step=0.1)
         
         # Parâmetros de pressão
         st.markdown("**Parâmetros de Pressão (mca)**")
-        pressao_baixa = st.slider("Pressão BAIXA", 0.0, 6.0, 
-                                 (detector.param_pressao['BAIXA']['faixa'][0],
-                                  detector.param_pressao['BAIXA']['faixa'][2]),
-                                 0.1)
+        col1, col2, col3 = st.columns(3)
         
-        pressao_media = st.slider("Pressão MÉDIA", 3.0, 9.0, 
-                                 (detector.param_pressao['MEDIA']['faixa'][0],
-                                  detector.param_pressao['MEDIA']['faixa'][2]),
-                                 0.1)
+        with col1:
+            pressao_baixa_centro = st.number_input("Centro Pressão BAIXA", 
+                                                  min_value=0.0, max_value=6.0, 
+                                                  value=float(detector.param_pressao['BAIXA']['faixa'][1]), 
+                                                  step=0.1)
         
-        pressao_alta = st.slider("Pressão ALTA", 6.0, 12.0, 
-                                (detector.param_pressao['ALTA']['faixa'][0],
-                                 detector.param_pressao['ALTA']['faixa'][2]),
-                                0.1)
+        with col2:
+            pressao_media_centro = st.number_input("Centro Pressão MÉDIA", 
+                                                  min_value=3.0, max_value=9.0, 
+                                                  value=float(detector.param_pressao['MEDIA']['faixa'][1]), 
+                                                  step=0.1)
+        
+        with col3:
+            pressao_alta_centro = st.number_input("Centro Pressão ALTA", 
+                                                 min_value=6.0, max_value=12.0, 
+                                                 value=float(detector.param_pressao['ALTA']['faixa'][1]), 
+                                                 step=0.1)
         
         if st.button("Atualizar Parâmetros Fuzzy"):
+            # Calcular faixas automaticamente baseadas nos centros
+            # Para conjuntos triangulares: [min, centro, max]
+            vazao_baixa_faixa = [max(5.0, vazao_baixa_centro - 2), vazao_baixa_centro, min(12.0, vazao_baixa_centro + 2)]
+            vazao_normal_faixa = [max(8.0, vazao_normal_centro - 2.5), vazao_normal_centro, min(15.0, vazao_normal_centro + 2.5)]
+            vazao_alta_faixa = [max(12.0, vazao_alta_centro - 2), vazao_alta_centro, min(18.0, vazao_alta_centro + 2)]
+            
+            pressao_baixa_faixa = [max(0.0, pressao_baixa_centro - 2), pressao_baixa_centro, min(6.0, pressao_baixa_centro + 2)]
+            pressao_media_faixa = [max(3.0, pressao_media_centro - 2), pressao_media_centro, min(9.0, pressao_media_centro + 2)]
+            pressao_alta_faixa = [max(6.0, pressao_alta_centro - 2), pressao_alta_centro, min(12.0, pressao_alta_centro + 2)]
+            
             # Atualizar parâmetros fuzzy
             detector.param_vazao = {
-                'BAIXA': {'faixa': [vazao_baixa[0], (vazao_baixa[0] + vazao_baixa[1]) / 2, vazao_baixa[1]]},
-                'NORMAL': {'faixa': [vazao_normal[0], (vazao_normal[0] + vazao_normal[1]) / 2, vazao_normal[1]]},
-                'ALTA': {'faixa': [vazao_alta[0], (vazao_alta[0] + vazao_alta[1]) / 2, vazao_alta[1]]}
+                'BAIXA': {'faixa': vazao_baixa_faixa},
+                'NORMAL': {'faixa': vazao_normal_faixa},
+                'ALTA': {'faixa': vazao_alta_faixa}
             }
             
             detector.param_pressao = {
-                'BAIXA': {'faixa': [pressao_baixa[0], (pressao_baixa[0] + pressao_baixa[1]) / 2, pressao_baixa[1]]},
-                'MEDIA': {'faixa': [pressao_media[0], (pressao_media[0] + pressao_media[1]) / 2, pressao_media[1]]},
-                'ALTA': {'faixa': [pressao_alta[0], (pressao_alta[0] + pressao_alta[1]) / 2, pressao_alta[1]]}
+                'BAIXA': {'faixa': pressao_baixa_faixa},
+                'MEDIA': {'faixa': pressao_media_faixa},
+                'ALTA': {'faixa': pressao_alta_faixa}
             }
             
             # Resetar sistema fuzzy para forçar recriação com novos parâmetros
             detector.sistema_fuzzy = None
             
             st.success("Parâmetros fuzzy atualizados com sucesso!")
+            
+            # Mostrar as faixas calculadas
+            st.subheader("Faixas Calculadas")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("**Vazão:**")
+                st.text(f"BAIXA: {vazao_baixa_faixa}")
+                st.text(f"NORMAL: {vazao_normal_faixa}")
+                st.text(f"ALTA: {vazao_alta_faixa}")
+            
+            with col2:
+                st.markdown("**Pressão:**")
+                st.text(f"BAIXA: {pressao_baixa_faixa}")
+                st.text(f"MÉDIA: {pressao_media_faixa}")
+                st.text(f"ALTA: {pressao_alta_faixa}")
     
     # Resetar sistema para valores padrão
     st.markdown("##### Resetar Sistema")
     if st.button("Resetar Sistema para Valores Padrão", type="primary", use_container_width=True):
-        # Criar um novo detector com valores padrão
-        st.session_state['detector'] = DetectorVazamentosColeipa()
+        # Limpar cache e criar um novo detector com valores padrão
+        try:
+            obter_detector.clear()
+        except:
+            pass  # Caso a função clear não exista
         st.success("Sistema resetado para valores padrão!")
-        st.info("Atualize a página para ver as mudanças.")
+        st.info("Atualize a página manualmente para ver as mudanças.")
 
 
 # Executar a aplicação

@@ -831,8 +831,8 @@ class DetectorVazamentosColeipa:
         current_ivi = self.caracteristicas_sistema['ivi']
         
         # IVI values based on World Bank classification
-        ivi_valores = [2, 6, 12, current_ivi]  # Representative of categories A, B, C, D
-        ivi_categorias = ['BOM (2.0)', 'REGULAR (6.0)', 'RUIM (12.0)', f'MUITO RUIM ({current_ivi:.2f})']
+        ivi_valores = [2, 6, 12, 16]  # Representative of categories A, B, C, D
+        ivi_categorias = ['BOM (2.0)', 'REGULAR (6.0)', 'RUIM (12.0)', f'MUITO RUIM (16.0)']
         ivi_classificacoes = ['Category A', 'Category B', 'Category C', 'Category D']
         
         # Values for heat map based on Coleipa data
@@ -1220,7 +1220,7 @@ def mostrar_pagina_inicio():
         The SAAP (Drinking Water Supply System) of Coleipa neighborhood, located in Santa 
         Bárbara do Pará, presents typical characteristics of systems with significant losses:
         
-        - **IVI (Infrastructure Leakage Index)**: 16.33 (Category D - Very Bad)
+        - **IVI (Infrastructure Leakage Index)**: {current_ivi:.2f}
         - **Real losses**: 44.50% of the distributed volume
         - **Pressures**: Consistently below the recommended minimum (10 mca)
         - **Characteristic pattern**: High flows with low pressures

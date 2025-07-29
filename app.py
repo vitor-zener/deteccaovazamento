@@ -704,9 +704,15 @@ class DetectorVazamentosColeipa:
         else:
             classe_pressao = "ALTA (boa)"
         
-        # Usar função utilitária para classificar IVI
-        classificacao_ivi = self.classificar_ivi(ivi)
-        classe_ivi = f"{classificacao_ivi['categoria_simples']} ({classificacao_ivi['categoria']})"
+        # Usar classificação manual para compatibilidade
+        if ivi <= 4:
+            classe_ivi = "BOM (Categoria A - Eficiente)"
+        elif ivi <= 8:
+            classe_ivi = "REGULAR (Categoria B - Regular)"
+        elif ivi <= 16:
+            classe_ivi = "RUIM (Categoria C - Ruim)"
+        else:
+            classe_ivi = "MUITO RUIM (Categoria D - Muito Ruim)"
         
         # Avaliação fuzzy
         risco_fuzzy = self.avaliar_risco_fuzzy(vazao, pressao, ivi)
@@ -869,18 +875,18 @@ class DetectorVazamentosColeipa:
         # IVI atual calculado dinamicamente
         ivi_atual = self.caracteristicas_sistema.get('ivi', 16.33)
         
-        # Usar função utilitária para determinar categoria do IVI atual
-        classificacao_atual = self.classificar_ivi(ivi_atual)
-        categoria_atual = classificacao_atual['categoria_simples']
-        
-        # Determinar índice para substituição
-        if categoria_atual == "BOM":
+        # Determinar categoria do IVI atual usando lógica manual
+        if ivi_atual <= 4:
+            categoria_atual = "BOM"
             indice_atual = 0
-        elif categoria_atual == "REGULAR":
+        elif ivi_atual <= 8:
+            categoria_atual = "REGULAR"
             indice_atual = 1
-        elif categoria_atual == "RUIM":
+        elif ivi_atual <= 16:
+            categoria_atual = "RUIM"
             indice_atual = 2
-        else:  # MUITO RUIM
+        else:
+            categoria_atual = "MUITO RUIM"
             indice_atual = 3
         
         # Valores de IVI baseados na classificação do Banco Mundial
@@ -1168,6 +1174,35 @@ def obter_detector(arquivo_uploaded=None):
         detector_padrao._garantir_parametros_ivi()
         return detector_padrao
 
+def obter_detector_seguro(arquivo_uploaded=None):
+    """
+    Função segura para obter detector, com fallback em caso de problemas de cache
+    """
+    try:
+        detector = obter_detector(arquivo_uploaded)
+        # Testar se o detector tem os métodos necessários
+        if hasattr(detector, 'classificar_ivi') and hasattr(detector, 'exibir_status_ivi_streamlit'):
+            return detector
+        else:
+            # Se não tem os métodos, limpar cache e recriar
+            st.warning("⚠️ Cache desatualizado detectado. Recriando detector...")
+            obter_detector.clear()
+            detector_novo = DetectorVazamentosColeipa(arquivo_uploaded)
+            detector_novo._garantir_parametros_ivi()
+            return detector_novo
+    except AttributeError as e:
+        # Erro específico de atributo faltando
+        st.warning(f"⚠️ Problema de cache detectado: {str(e)}. Recriando detector...")
+        try:
+            obter_detector.clear()
+        except:
+            pass
+        return DetectorVazamentosColeipa(arquivo_uploaded)
+    except Exception as e:
+        st.error(f"❌ Erro ao obter detector: {e}")
+        # Em último caso, criar detector sem cache
+        return DetectorVazamentosColeipa(arquivo_uploaded)
+
 # Função para download de arquivos
 def botao_download(objeto_para_download, nome_arquivo_download, texto_botao):
     """
@@ -1196,6 +1231,111 @@ def botao_download(objeto_para_download, nome_arquivo_download, texto_botao):
         st.warning("Tipo de objeto não suportado para download")
 
 
+# CORREÇÃO APLICADA: Para resolver problemas de AttributeError relacionados ao cache do Streamlit,
+# as funções utilitárias classificar_ivi() e exibir_status_ivi_streamlit() foram mantidas na classe
+# mas as chamadas foram substituídas por lógica manual nas funções de interface para evitar
+# problemas quando o cache contém versões antigas da classe que não possuem esses métodos.
+# Isso garante compatibilidade e estabilidade da aplicação.
+
+def validar_ivi(detector):
+    """
+    Função para validar e obter IVI do detector de forma segura
+    """
+    try:
+        ivi_atual = detector.caracteristicas_sistema.get('ivi', 16.33)
+        return float(ivi_atual)
+    except (ValueError, TypeError, AttributeError):
+        return 16.33
+
+def classificar_ivi_manual(ivi_valor):
+    """
+    Função manual para classificar IVI sem depender da classe
+    """
+    try:
+        ivi_valor = float(ivi_valor)
+    except (ValueError, TypeError):
+        ivi_valor = 16.33
+        
+    if ivi_valor <= 4:
+        return {
+            'categoria': 'Categoria A (Eficiente)',
+            'cor_st': 'success',
+            'emoji': '✅',
+            'categoria_simples': 'BOM'
+        }
+    elif ivi_valor <= 8:
+        return {
+            'categoria': 'Categoria B (Regular)',
+            'cor_st': 'info',
+            'emoji': 'ℹ️',
+            'categoria_simples': 'REGULAR'
+        }
+    elif ivi_valor <= 16:
+        return {
+            'categoria': 'Categoria C (Ruim)',
+            'cor_st': 'warning',
+            'emoji': '⚠️',
+            'categoria_simples': 'RUIM'
+        }
+    else:
+        return {
+            'categoria': 'Categoria D (Muito Ruim)',
+            'cor_st': 'error',
+            'emoji': '🚨',
+            'categoria_simples': 'MUITO RUIM'
+        }
+
+def exibir_ivi_status(detector, prefixo="IVI ATUAL DO SISTEMA"):
+    """
+    Função para exibir status do IVI de forma segura
+    """
+    ivi_atual = validar_ivi(detector)
+    classificacao = classificar_ivi_manual(ivi_atual)
+    
+    if classificacao['cor_st'] == 'success':
+        st.success(f"{classificacao['emoji']} **{prefixo}: {ivi_atual:.2f}** - {classificacao['categoria']}")
+    elif classificacao['cor_st'] == 'info':
+        st.info(f"{classificacao['emoji']} **{prefixo}: {ivi_atual:.2f}** - {classificacao['categoria']}")
+    elif classificacao['cor_st'] == 'warning':
+        st.warning(f"{classificacao['emoji']} **{prefixo}: {ivi_atual:.2f}** - {classificacao['categoria']}")
+    else:
+        st.error(f"{classificacao['emoji']} **{prefixo}: {ivi_atual:.2f}** - {classificacao['categoria']}")
+    
+    return classificacao
+
+def exibir_ivi_calculado(ivi_valor, prefixo="IVI CALCULADO"):
+    """
+    Função específica para exibir IVI calculado
+    """
+    classificacao = classificar_ivi_manual(ivi_valor)
+    
+    if classificacao['cor_st'] == 'success':
+        st.success(f"{classificacao['emoji']} **{prefixo}: {ivi_valor:.2f}** - {classificacao['categoria']}")
+    elif classificacao['cor_st'] == 'info':
+        st.info(f"{classificacao['emoji']} **{prefixo}: {ivi_valor:.2f}** - {classificacao['categoria']}")
+    elif classificacao['cor_st'] == 'warning':
+        st.warning(f"{classificacao['emoji']} **{prefixo}: {ivi_valor:.2f}** - {classificacao['categoria']}")
+    else:
+        st.error(f"{classificacao['emoji']} **{prefixo}: {ivi_valor:.2f}** - {classificacao['categoria']}")
+    
+    return classificacao
+    """
+    Função para exibir status do IVI de forma segura
+    """
+    ivi_atual = validar_ivi(detector)
+    classificacao = classificar_ivi_manual(ivi_atual)
+    
+    if classificacao['cor_st'] == 'success':
+        st.success(f"{classificacao['emoji']} **{prefixo}: {ivi_atual:.2f}** - {classificacao['categoria']}")
+    elif classificacao['cor_st'] == 'info':
+        st.info(f"{classificacao['emoji']} **{prefixo}: {ivi_atual:.2f}** - {classificacao['categoria']}")
+    elif classificacao['cor_st'] == 'warning':
+        st.warning(f"{classificacao['emoji']} **{prefixo}: {ivi_atual:.2f}** - {classificacao['categoria']}")
+    else:
+        st.error(f"{classificacao['emoji']} **{prefixo}: {ivi_atual:.2f}** - {classificacao['categoria']}")
+    
+    return classificacao
+
 def aplicacao_principal():
     """Função principal da aplicação Streamlit"""
     st.title("💧 Sistema de Detecção de Vazamentos - SAAP Coleipa")
@@ -1221,8 +1361,13 @@ def aplicacao_principal():
     st.sidebar.subheader("Dados de Entrada")
     arquivo_uploaded = st.sidebar.file_uploader("Carregar dados de monitoramento", type=["xlsx", "csv"])
     
-    # Inicializar ou obter detector
-    detector = obter_detector(arquivo_uploaded)
+    # Inicializar ou obter detector usando função segura
+    detector = obter_detector_seguro(arquivo_uploaded)
+    
+    # Teste de integridade do detector
+    if not hasattr(detector, 'caracteristicas_sistema'):
+        st.error("❌ Detector não foi inicializado corretamente. Tentando recriar...")
+        detector = DetectorVazamentosColeipa(arquivo_uploaded)
     
     # Modelo para download na barra lateral
     st.sidebar.markdown("---")
@@ -1240,6 +1385,28 @@ def aplicacao_principal():
         "Santa Bárbara do Pará - PA. Utiliza lógica fuzzy e modelos Bayesianos "
         "para detecção de vazamentos em redes de abastecimento de água."
     )
+    
+    # Botão para limpar cache em caso de problemas
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("Status do Sistema")
+    
+    # Verificar integridade do detector
+    if hasattr(detector, 'caracteristicas_sistema') and hasattr(detector, 'classificar_ivi'):
+        st.sidebar.success("✅ Detector carregado corretamente")
+        ivi_atual = validar_ivi(detector)
+        classificacao = classificar_ivi_manual(ivi_atual)
+        
+        status_ivi = f"{classificacao['emoji']} IVI: {classificacao['categoria_simples']}"
+        st.sidebar.info(f"{status_ivi} ({ivi_atual:.2f})")
+    else:
+        st.sidebar.error("❌ Problema no detector")
+    
+    if st.sidebar.button("🔄 Limpar Cache (se houver erros)"):
+        try:
+            obter_detector.clear()
+            st.sidebar.success("Cache limpo! Recarregue a página.")
+        except Exception as e:
+            st.sidebar.warning(f"Erro ao limpar cache: {e}")
     
     # Conteúdo principal baseado na página selecionada
     if pagina_selecionada == "Início":
@@ -1280,9 +1447,8 @@ def mostrar_pagina_inicio(detector):
     detectar vazamentos em redes de abastecimento de água baseado em dados de monitoramento.
     """)
     
-    # Exibir IVI atual no topo usando a função utilitária
-    ivi_atual = detector.caracteristicas_sistema.get('ivi', 16.33)
-    detector.exibir_status_ivi_streamlit(ivi_atual, "IVI ATUAL DO SISTEMA")
+    # Exibir IVI atual no topo usando função utilitária segura
+    exibir_ivi_status(detector, "IVI ATUAL DO SISTEMA")
     
     # Visão geral em 3 colunas
     col1, col2, col3 = st.columns(3)
@@ -1317,15 +1483,18 @@ def mostrar_pagina_inicio(detector):
     
     col1, col2 = st.columns(2)
     
+    # Obter IVI atual para uso em ambas as colunas
+    ivi_atual = validar_ivi(detector)
+    
     with col1:
-        # Obter classificação atual do IVI
-        classificacao_ivi = detector.classificar_ivi(ivi_atual)
+        # Obter classificação atual do IVI com função utilitária
+        classificacao = classificar_ivi_manual(ivi_atual)
         
         st.markdown(f"""
         O SAAP (Sistema de Abastecimento de Água Potável) do bairro Coleipa, localizado em Santa 
         Bárbara do Pará, apresenta características típicas de sistemas com perdas significativas:
         
-        - **IVI (Índice de Vazamentos da Infraestrutura)**: {ivi_atual:.2f} - {classificacao_ivi['categoria']}
+        - **IVI (Índice de Vazamentos da Infraestrutura)**: {ivi_atual:.2f} - {classificacao['categoria']}
         - **Perdas reais**: 44.50% do volume distribuído
         - **Pressões**: Consistentemente abaixo do mínimo recomendado (10 mca)
         - **Padrão característico**: Vazões altas com pressões baixas
@@ -1524,13 +1693,22 @@ def mostrar_pagina_bayes(detector):
                 # Características do sistema
                 st.markdown("#### Características do Sistema Coleipa")
                 ivi_atual = detector.caracteristicas_sistema.get('ivi', 16.33)
-                classificacao_ivi = detector.classificar_ivi(ivi_atual)
+                
+                # Classificação manual para evitar problemas de cache
+                if ivi_atual <= 4:
+                    categoria = "Categoria A - Eficiente"
+                elif ivi_atual <= 8:
+                    categoria = "Categoria B - Regular"
+                elif ivi_atual <= 16:
+                    categoria = "Categoria C - Ruim"
+                else:
+                    categoria = "Categoria D - Muito Ruim"
                 
                 st.markdown(f"""
                 - **População**: {detector.caracteristicas_sistema['populacao']} habitantes
                 - **Área**: {detector.caracteristicas_sistema['area_territorial']/1000:.1f} km²
                 - **Perdas reais**: {detector.caracteristicas_sistema['percentual_perdas']:.1f}%
-                - **IVI**: {ivi_atual:.2f} ({classificacao_ivi['categoria']})
+                - **IVI**: {ivi_atual:.2f} ({categoria})
                 """)
     
     # Explicação do modelo
@@ -1565,9 +1743,10 @@ def mostrar_pagina_mapa_calor(detector):
     st.header("🔥 Mapas de Calor IVI")
     st.markdown("Análise de risco para diferentes combinações de vazão e pressão, considerando diferentes valores de IVI")
     
-    # Mostrar IVI atual calculado no topo da página usando função utilitária
-    ivi_atual = detector.caracteristicas_sistema.get('ivi', 16.33)
-    detector.exibir_status_ivi_streamlit(ivi_atual, "IVI ATUAL DO SISTEMA")
+    # Mostrar IVI atual calculado no topo da página com função utilitária segura
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        exibir_ivi_status(detector, "IVI ATUAL DO SISTEMA")
     
     # Configuração do mapa de calor
     st.subheader("Configuração")
@@ -1735,9 +1914,8 @@ def mostrar_pagina_analise_caso(detector):
     # Formulário para entrada de dados
     st.subheader("Parâmetros do Sistema")
     
-    # Mostrar IVI atual sendo usado
-    ivi_atual = detector.caracteristicas_sistema.get('ivi', 16.33)
-    detector.exibir_status_ivi_streamlit(ivi_atual, "IVI atual do sistema")
+    # Mostrar IVI atual sendo usado com função utilitária segura
+    exibir_ivi_status(detector, "IVI atual do sistema")
     
     col1, col2, col3 = st.columns(3)
     
@@ -1842,8 +2020,8 @@ def mostrar_pagina_relatorio(detector):
             st.markdown("---")
             st.subheader("RELATÓRIO DE ANÁLISE - SISTEMA COLEIPA")
             
-            # Mostrar IVI atual no topo usando função utilitária
-            detector.exibir_status_ivi_streamlit(ivi_atual, "IVI ATUAL")
+            # Mostrar IVI atual no topo com função utilitária segura
+            exibir_ivi_status(detector, "IVI ATUAL")
             
             st.markdown("---")
             
@@ -1883,13 +2061,28 @@ def mostrar_pagina_relatorio(detector):
             with col3:
                 st.metric("IVI", f"{relatorio['indicadores']['ivi']:.2f}", "Índice de Vazamentos da Infraestrutura")
             
-            # 4. Classificação usando função utilitária
+            # 4. Classificação usando função utilitária segura
             st.subheader("4. CLASSIFICAÇÃO (Banco Mundial)")
-            classificacao_ivi = detector.classificar_ivi(ivi_atual)
+            
+            classificacao_ivi = classificar_ivi_manual(ivi_atual)
+            
+            if classificacao_ivi['categoria_simples'] == 'BOM':
+                interpretacao = "Sistema eficiente com perdas próximas às inevitáveis"
+                recomendacao = "Manter práticas atuais de gestão"
+            elif classificacao_ivi['categoria_simples'] == 'REGULAR':
+                interpretacao = "Sistema regular, melhorias recomendadas"
+                recomendacao = "Implementar melhorias graduais no sistema"
+            elif classificacao_ivi['categoria_simples'] == 'RUIM':
+                interpretacao = "Sistema ruim, ações urgentes necessárias"
+                recomendacao = "Implementar programa de redução de perdas urgente"
+            else:
+                interpretacao = "Sistema muito ruim, intervenção imediata necessária"
+                recomendacao = "Programas de redução de perdas são imperiosos e prioritários"
+            
             st.markdown(f"""
             - **Categoria**: {classificacao_ivi['categoria']}
-            - **Interpretação**: {classificacao_ivi['interpretacao']}
-            - **Recomendação**: {classificacao_ivi['recomendacao']}
+            - **Interpretação**: {interpretacao}
+            - **Recomendação**: {recomendacao}
             """)
             
             # 5. Metodologia NPR - Priorização de Ações
@@ -2385,8 +2578,8 @@ def mostrar_pagina_configuracoes(detector):
             
             st.success(f"IVI calculado com sucesso: {ivi:.2f}")
             
-            # Exibir classificação usando função utilitária
-            detector.exibir_status_ivi_streamlit(ivi, "IVI CALCULADO")
+            # Exibir classificação com função específica para IVI calculado
+            classificacao_calculada = exibir_ivi_calculado(ivi, "IVI CALCULADO")
             
             # Exibir resultados detalhados conforme as imagens
             st.subheader("Detalhes do Cálculo - Conforme Documentação")
@@ -2440,18 +2633,31 @@ def mostrar_pagina_configuracoes(detector):
                 # Destacar que está usando nova fórmula
                 st.info("💡 **Cálculo realizado com a nova fórmula IPRI**")
             
-            # Usar função utilitária para classificação detalhada
-            classificacao_ivi = detector.classificar_ivi(ivi)
-            
+            # Classificação detalhada com função utilitária
             st.markdown("---")
             st.subheader("Classificação do IVI (Banco Mundial)")
             
-            st.markdown(f"""
-            ### {classificacao_ivi['cor']} {classificacao_ivi['categoria']}
-            **IVI: {ivi:.2f}**  
-            *{classificacao_ivi['interpretacao']}*
+            classificacao_ivi = classificar_ivi_manual(ivi)
             
-            **Recomendação:** {classificacao_ivi['recomendacao']}
+            if classificacao_ivi['categoria_simples'] == 'BOM':
+                interpretacao = "Sistema eficiente com perdas próximas às inevitáveis"
+                recomendacao = "Manter práticas atuais de gestão"
+            elif classificacao_ivi['categoria_simples'] == 'REGULAR':
+                interpretacao = "Sistema regular, melhorias recomendadas"
+                recomendacao = "Implementar melhorias graduais no sistema"
+            elif classificacao_ivi['categoria_simples'] == 'RUIM':
+                interpretacao = "Sistema ruim, ações urgentes necessárias"
+                recomendacao = "Implementar programa de redução de perdas urgente"
+            else:
+                interpretacao = "Sistema muito ruim, intervenção imediata necessária"
+                recomendacao = "Programas de redução de perdas são imperiosos e prioritários"
+            
+            st.markdown(f"""
+            ### {classificacao_ivi['emoji']} {classificacao_ivi['categoria']}
+            **IVI: {ivi:.2f}**  
+            *{interpretacao}*
+            
+            **Recomendação:** {recomendacao}
             
             O sistema Coleipa apresenta IVI = {ivi:.2f}, indicando que as perdas reais são 
             {ivi:.2f} vezes maiores que as perdas inevitáveis.
@@ -2643,8 +2849,9 @@ def mostrar_pagina_configuracoes(detector):
     
     with col2:
         st.markdown("##### 📊 IVI")
-        ivi_atual = detector.caracteristicas_sistema.get('ivi', 16.33)
-        classificacao_ivi = detector.classificar_ivi(ivi_atual)
+        ivi_atual = validar_ivi(detector)
+        classificacao_ivi = classificar_ivi_manual(ivi_atual)
+            
         st.text(f"IVI Atual: {ivi_atual:.2f}")
         st.text(f"Categoria: {classificacao_ivi['categoria_simples']}")
         st.text(f"IPRL: {detector.caracteristicas_sistema.get('iprl', 0.343):.3f}")

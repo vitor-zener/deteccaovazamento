@@ -56,6 +56,9 @@ class DetectorVazamentosColeipa:
             'coeficiente_ramais': 25.0  # Coeficiente para distância dos ramais na fórmula IPRI
         }
         
+        # Garantir compatibilidade com versões anteriores
+        self._garantir_parametros_ivi()
+        
         # Dados padrão codificados (usados apenas se nenhum arquivo for fornecido)
         self.dados_coleipa_padrao = {
             'hora': list(range(1, 25)),
@@ -110,6 +113,24 @@ class DetectorVazamentosColeipa:
         # Inicialização dos componentes
         self.sistema_fuzzy = None
         self.modelo_bayes = None
+    
+    def _garantir_parametros_ivi(self):
+        """
+        Garante que todos os parâmetros necessários para cálculo de IVI existem
+        Usado para compatibilidade com versões anteriores
+        """
+        parametros_padrao_ivi = {
+            'volume_perdido_anual': 37547.55,
+            'distancia_lote_medidor': 0.001,
+            'pressao_operacao_adequada': 20.0,
+            'coeficiente_rede': 8.0,
+            'coeficiente_ligacoes': 0.8,
+            'coeficiente_ramais': 25.0
+        }
+        
+        for chave, valor_padrao in parametros_padrao_ivi.items():
+            if chave not in self.caracteristicas_sistema:
+                self.caracteristicas_sistema[chave] = valor_padrao
     
     def carregar_dados_arquivo(self, arquivo_uploaded):
         """
@@ -422,17 +443,20 @@ class DetectorVazamentosColeipa:
         float: Valor do IVI calculado
         dict: Dicionário com componentes do cálculo (IPRL, IPRI, etc.)
         """
-        # Usar parâmetros configuráveis do sistema
-        Vp_anual = self.caracteristicas_sistema['volume_perdido_anual']  # Volume perdido anual (m³/ano)
-        Nc = self.caracteristicas_sistema['numero_ligacoes']  # Número de ligações
-        Lm = self.caracteristicas_sistema['comprimento_rede']  # Comprimento da rede (km) 
-        Lp = self.caracteristicas_sistema['distancia_lote_medidor']  # Distância lote-medidor (km)
-        P = self.caracteristicas_sistema['pressao_operacao_adequada']  # Pressão adequada (mca)
+        # Garantir que todos os parâmetros existem
+        self._garantir_parametros_ivi()
         
-        # Coeficientes da fórmula IPRI (parametrizáveis)
-        coef_rede = self.caracteristicas_sistema['coeficiente_rede']  # Padrão: 8 (corrigido conforme imagem)
-        coef_ligacoes = self.caracteristicas_sistema['coeficiente_ligacoes']  # Padrão: 0.8
-        coef_ramais = self.caracteristicas_sistema['coeficiente_ramais']  # Padrão: 25
+        # Usar parâmetros configuráveis do sistema com valores de fallback
+        Vp_anual = self.caracteristicas_sistema.get('volume_perdido_anual', 37547.55)
+        Nc = self.caracteristicas_sistema.get('numero_ligacoes', 300)
+        Lm = self.caracteristicas_sistema.get('comprimento_rede', 3.0)
+        Lp = self.caracteristicas_sistema.get('distancia_lote_medidor', 0.001)
+        P = self.caracteristicas_sistema.get('pressao_operacao_adequada', 20.0)
+        
+        # Coeficientes da fórmula IPRI (parametrizáveis) com valores de fallback
+        coef_rede = self.caracteristicas_sistema.get('coeficiente_rede', 8.0)
+        coef_ligacoes = self.caracteristicas_sistema.get('coeficiente_ligacoes', 0.8)
+        coef_ramais = self.caracteristicas_sistema.get('coeficiente_ramais', 25.0)
         
         # Cálculo do IPRL (Índice de Perdas Reais por Ligação) - Equação 3
         # IPRL = Vp / (Nc × 365)
@@ -1049,11 +1073,16 @@ st.set_page_config(
 @st.cache_resource
 def obter_detector(arquivo_uploaded=None):
     try:
-        return DetectorVazamentosColeipa(arquivo_uploaded)
+        detector = DetectorVazamentosColeipa(arquivo_uploaded)
+        # Garantir compatibilidade com versões anteriores
+        detector._garantir_parametros_ivi()
+        return detector
     except Exception as e:
         st.error(f"Erro ao inicializar detector: {e}")
         # Retornar detector com dados padrão em caso de erro
-        return DetectorVazamentosColeipa()
+        detector_padrao = DetectorVazamentosColeipa()
+        detector_padrao._garantir_parametros_ivi()
+        return detector_padrao
 
 # Função para download de arquivos
 def botao_download(objeto_para_download, nome_arquivo_download, texto_botao):
@@ -1933,6 +1962,68 @@ def mostrar_pagina_configuracoes(detector):
     st.header("⚙️ Configurações")
     st.markdown("Configurar parâmetros do sistema")
     
+    # Garantir que todos os parâmetros existem (segurança adicional)
+    detector._garantir_parametros_ivi()
+    
+    # Verificar se todos os parâmetros necessários estão presentes
+    parametros_necessarios = [
+        'volume_perdido_anual', 'distancia_lote_medidor', 'pressao_operacao_adequada',
+        'coeficiente_rede', 'coeficiente_ligacoes', 'coeficiente_ramais'
+    ]
+    
+    parametros_faltando = [p for p in parametros_necessarios if p not in detector.caracteristicas_sistema]
+    
+    if parametros_faltando:
+        st.warning(f"Parâmetros faltando detectados: {parametros_faltando}. Aplicando valores padrão.")
+        # Forçar atualização
+        detector._garantir_parametros_ivi()
+    
+    # Botão de diagnóstico
+    if st.button("🔍 Executar Diagnóstico do Sistema"):
+        st.subheader("Diagnóstico do Sistema")
+        
+        # Verificar todos os parâmetros
+        todos_parametros = [
+            'area_territorial', 'populacao', 'numero_ligacoes', 'comprimento_rede',
+            'densidade_ramais', 'vazao_media_normal', 'pressao_media_normal',
+            'perdas_reais_media', 'volume_consumido_medio', 'percentual_perdas',
+            'iprl', 'ipri', 'ivi', 'volume_perdido_anual', 'distancia_lote_medidor',
+            'pressao_operacao_adequada', 'coeficiente_rede', 'coeficiente_ligacoes',
+            'coeficiente_ramais'
+        ]
+        
+        parametros_presentes = []
+        parametros_ausentes = []
+        
+        for param in todos_parametros:
+            if param in detector.caracteristicas_sistema:
+                parametros_presentes.append(param)
+            else:
+                parametros_ausentes.append(param)
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.success(f"✅ Parâmetros presentes: {len(parametros_presentes)}/{len(todos_parametros)}")
+            if parametros_presentes:
+                with st.expander("Ver parâmetros presentes"):
+                    for param in parametros_presentes:
+                        valor = detector.caracteristicas_sistema.get(param, "N/A")
+                        st.text(f"{param}: {valor}")
+        
+        with col2:
+            if parametros_ausentes:
+                st.error(f"❌ Parâmetros ausentes: {len(parametros_ausentes)}")
+                with st.expander("Ver parâmetros ausentes"):
+                    for param in parametros_ausentes:
+                        st.text(param)
+                
+                if st.button("🔧 Corrigir Parâmetros Ausentes"):
+                    detector._garantir_parametros_ivi()
+                    st.success("Parâmetros corrigidos! Atualize a página para ver as mudanças.")
+            else:
+                st.success("✅ Todos os parâmetros estão presentes")
+    
     # Formulário de características do sistema
     st.subheader("Características do Sistema")
     
@@ -2030,20 +2121,20 @@ def mostrar_pagina_configuracoes(detector):
         
         with col1:
             volume_perdido_anual = st.number_input("Volume Perdido Anual (Vp) [m³/ano]", 
-                                                   value=float(detector.caracteristicas_sistema['volume_perdido_anual']),
+                                                   value=float(detector.caracteristicas_sistema.get('volume_perdido_anual', 37547.55)),
                                                    step=100.0,
                                                    min_value=0.0,
                                                    help="Volume total de água perdido por ano")
             
             distancia_lote_medidor = st.number_input("Distância Lote-Medidor (Lp) [km]", 
-                                                     value=float(detector.caracteristicas_sistema['distancia_lote_medidor']),
+                                                     value=float(detector.caracteristicas_sistema.get('distancia_lote_medidor', 0.001)),
                                                      step=0.001,
                                                      min_value=0.0,
                                                      format="%.3f",
                                                      help="Distância média entre limite do lote e medidor hidrômetro")
             
             pressao_operacao_adequada = st.number_input("Pressão de Operação Adequada (P) [mca]", 
-                                                        value=float(detector.caracteristicas_sistema['pressao_operacao_adequada']),
+                                                        value=float(detector.caracteristicas_sistema.get('pressao_operacao_adequada', 20.0)),
                                                         step=1.0,
                                                         min_value=0.0,
                                                         help="Pressão média de operação adequada do sistema")
@@ -2053,19 +2144,19 @@ def mostrar_pagina_configuracoes(detector):
             st.markdown("*IPRI = (C₁×Lm + C₂×Nc + C₃×Lp) × P / Nc*")
             
             coeficiente_rede = st.number_input("Coeficiente da Rede (C₁)", 
-                                               value=float(detector.caracteristicas_sistema['coeficiente_rede']),
+                                               value=float(detector.caracteristicas_sistema.get('coeficiente_rede', 8.0)),
                                                step=0.1,
                                                min_value=0.0,
                                                help="Coeficiente para comprimento da rede (padrão: 8)")
             
             coeficiente_ligacoes = st.number_input("Coeficiente das Ligações (C₂)", 
-                                                   value=float(detector.caracteristicas_sistema['coeficiente_ligacoes']),
+                                                   value=float(detector.caracteristicas_sistema.get('coeficiente_ligacoes', 0.8)),
                                                    step=0.1,
                                                    min_value=0.0,
                                                    help="Coeficiente para número de ligações (padrão: 0.8)")
             
             coeficiente_ramais = st.number_input("Coeficiente dos Ramais (C₃)", 
-                                                 value=float(detector.caracteristicas_sistema['coeficiente_ramais']),
+                                                 value=float(detector.caracteristicas_sistema.get('coeficiente_ramais', 25.0)),
                                                  step=1.0,
                                                  min_value=0.0,
                                                  help="Coeficiente para distância dos ramais (padrão: 25)")
@@ -2416,36 +2507,54 @@ def mostrar_pagina_configuracoes(detector):
     
     with col1:
         st.markdown("##### 🏗️ Sistema")
-        st.text(f"População: {detector.caracteristicas_sistema['populacao']:,}")
-        st.text(f"Ligações: {detector.caracteristicas_sistema['numero_ligacoes']:,}")
-        st.text(f"Rede: {detector.caracteristicas_sistema['comprimento_rede']:.1f} km")
-        st.text(f"Área: {detector.caracteristicas_sistema['area_territorial']/1000:.1f} km²")
+        st.text(f"População: {detector.caracteristicas_sistema.get('populacao', 1200):,}")
+        st.text(f"Ligações: {detector.caracteristicas_sistema.get('numero_ligacoes', 300):,}")
+        st.text(f"Rede: {detector.caracteristicas_sistema.get('comprimento_rede', 3.0):.1f} km")
+        st.text(f"Área: {detector.caracteristicas_sistema.get('area_territorial', 319000)/1000:.1f} km²")
     
     with col2:
         st.markdown("##### 📊 IVI")
-        st.text(f"IVI Atual: {detector.caracteristicas_sistema['ivi']:.2f}")
-        st.text(f"IPRL: {detector.caracteristicas_sistema['iprl']:.3f}")
-        st.text(f"IPRI: {detector.caracteristicas_sistema['ipri']:.3f}")
-        st.text(f"Volume Perdido: {detector.caracteristicas_sistema['volume_perdido_anual']:.0f} m³/ano")
+        st.text(f"IVI Atual: {detector.caracteristicas_sistema.get('ivi', 16.33):.2f}")
+        st.text(f"IPRL: {detector.caracteristicas_sistema.get('iprl', 0.343):.3f}")
+        st.text(f"IPRI: {detector.caracteristicas_sistema.get('ipri', 0.021):.3f}")
+        st.text(f"Volume Perdido: {detector.caracteristicas_sistema.get('volume_perdido_anual', 37547.55):.0f} m³/ano")
     
     with col3:
         st.markdown("##### ⚙️ Operação")
-        st.text(f"Vazão Média: {detector.caracteristicas_sistema['vazao_media_normal']:.2f} l/s")
-        st.text(f"Pressão Média: {detector.caracteristicas_sistema['pressao_media_normal']:.2f} mca")
-        st.text(f"Perdas: {detector.caracteristicas_sistema['percentual_perdas']:.1f}%")
-        st.text(f"Densidade Ramais: {detector.caracteristicas_sistema['densidade_ramais']} ramais/km")
+        st.text(f"Vazão Média: {detector.caracteristicas_sistema.get('vazao_media_normal', 3.17):.2f} l/s")
+        st.text(f"Pressão Média: {detector.caracteristicas_sistema.get('pressao_media_normal', 5.22):.2f} mca")
+        st.text(f"Perdas: {detector.caracteristicas_sistema.get('percentual_perdas', 44.50):.1f}%")
+        st.text(f"Densidade Ramais: {detector.caracteristicas_sistema.get('densidade_ramais', 100)} ramais/km")
     
     # Resetar sistema para valores padrão
     st.markdown("---")
     st.markdown("##### ⚠️ Resetar Sistema")
-    if st.button("Resetar Sistema para Valores Padrão", type="primary", use_container_width=True):
-        # Limpar cache e criar um novo detector com valores padrão
-        try:
-            obter_detector.clear()
-        except:
-            pass  # Caso a função clear não exista
-        st.success("Sistema resetado para valores padrão!")
-        st.info("Atualize a página manualmente para ver as mudanças.")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("🔄 Limpar Cache", use_container_width=True, help="Limpa o cache para resolver problemas de compatibilidade"):
+            try:
+                obter_detector.clear()
+                st.success("Cache limpo com sucesso!")
+                st.info("Atualize a página para ver as mudanças.")
+            except Exception as e:
+                st.warning(f"Erro ao limpar cache: {e}")
+    
+    with col2:
+        if st.button("🔧 Resetar Sistema Completo", type="primary", use_container_width=True):
+            # Limpar cache e forçar recriação
+            try:
+                obter_detector.clear()
+            except:
+                pass
+            
+            # Recriar detector com valores padrão
+            detector_novo = DetectorVazamentosColeipa()
+            detector_novo._garantir_parametros_ivi()
+            
+            st.success("Sistema resetado completamente!")
+            st.info("Atualize a página manualmente para ver as mudanças.")
 
 
 # Executar a aplicação

@@ -2084,6 +2084,13 @@ def mostrar_pagina_analise_caso(detector):
     # Mostrar IVI atual sendo usado com função utilitária segura
     exibir_ivi_status(detector, "IVI atual do sistema")
     
+    # Obter IVI atual de maneira segura para usar como valor padrão
+    try:
+        ivi_atual = detector.caracteristicas_sistema.get('ivi', 16.33)
+        ivi_atual = float(ivi_atual)
+    except (ValueError, TypeError):
+        ivi_atual = 16.33
+    
     col1, col2, col3 = st.columns(3)
     
     with col1:
@@ -2095,7 +2102,8 @@ def mostrar_pagina_analise_caso(detector):
                                 help="Valor típico para Coleipa: 3.5 mca")
     
     with col3:
-        ivi = st.number_input("IVI", min_value=1.0, max_value=25.0, value=float(ivi_atual), step=0.01,
+        # Use o valor seguro de ivi_atual
+        ivi = st.number_input("IVI", min_value=1.0, max_value=25.0, value=ivi_atual, step=0.01,
                             help=f"IVI atual do sistema Coleipa: {ivi_atual:.2f}")
     
     # Botão para executar análise
@@ -2168,7 +2176,6 @@ def mostrar_pagina_analise_caso(detector):
     - 🟡 **RISCO ELEVADO - MONITORAR**: Situação de atenção, monitoramento recomendado
     - 🔴 **VAZAMENTO DETECTADO**: Alta probabilidade de vazamento, intervenção necessária
     """)
-
 
 def mostrar_pagina_relatorio(detector):
     """Página de relatório completo"""

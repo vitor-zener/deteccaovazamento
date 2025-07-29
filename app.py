@@ -114,6 +114,52 @@ class DetectorVazamentosColeipa:
         self.sistema_fuzzy = None
         self.modelo_bayes = None
     
+    def classificar_ivi_seguro(self, ivi_valor):
+        """
+        Método seguro para classificar IVI que funciona mesmo com problemas de cache
+        """
+        try:
+            ivi_valor = float(ivi_valor)
+        except (ValueError, TypeError):
+            ivi_valor = 16.33
+            
+        if ivi_valor <= 4:
+            return {
+                'categoria': 'A - Eficiente',
+                'categoria_simples': 'BOM',
+                'cor': '🟢',
+                'cor_streamlit': 'success',
+                'interpretacao': 'Sistema eficiente com perdas próximas às inevitáveis',
+                'recomendacao': 'Manter práticas atuais de gestão'
+            }
+        elif ivi_valor <= 8:
+            return {
+                'categoria': 'B - Regular',
+                'categoria_simples': 'REGULAR',
+                'cor': '🟡',
+                'cor_streamlit': 'info',
+                'interpretacao': 'Sistema regular, melhorias recomendadas',
+                'recomendacao': 'Implementar melhorias graduais no sistema'
+            }
+        elif ivi_valor <= 16:
+            return {
+                'categoria': 'C - Ruim',
+                'categoria_simples': 'RUIM',
+                'cor': '🟠',
+                'cor_streamlit': 'warning',
+                'interpretacao': 'Sistema ruim, ações urgentes necessárias',
+                'recomendacao': 'Implementar programa de redução de perdas urgente'
+            }
+        else:
+            return {
+                'categoria': 'D - Muito Ruim',
+                'categoria_simples': 'MUITO RUIM',
+                'cor': '🔴',
+                'cor_streamlit': 'error',
+                'interpretacao': 'Sistema muito ruim, intervenção imediata necessária',
+                'recomendacao': 'Programas de redução de perdas são imperiosos e prioritários'
+            }
+    
     def classificar_ivi(self, ivi_valor):
         """
         Função utilitária para classificar o IVI de forma consistente
@@ -704,7 +750,7 @@ class DetectorVazamentosColeipa:
         else:
             classe_pressao = "ALTA (boa)"
         
-        # Usar classificação manual para compatibilidade
+        # Usar classificação segura para evitar problemas de cache
         if ivi <= 4:
             classe_ivi = "BOM (Categoria A - Eficiente)"
         elif ivi <= 8:
@@ -875,7 +921,10 @@ class DetectorVazamentosColeipa:
         # IVI atual calculado dinamicamente
         ivi_atual = self.caracteristicas_sistema.get('ivi', 16.33)
         
-        # Determinar categoria do IVI atual usando lógica manual
+        # Determinar categoria do IVI atual usando função utilitária segura
+        ivi_atual = self.caracteristicas_sistema.get('ivi', 16.33)
+        
+        # Usar classificação manual para evitar problemas de cache
         if ivi_atual <= 4:
             categoria_atual = "BOM"
             indice_atual = 0
@@ -1336,6 +1385,41 @@ def exibir_ivi_calculado(ivi_valor, prefixo="IVI CALCULADO"):
     
     return classificacao
 
+def testar_integridade_detector(detector):
+    """
+    Testa a integridade do detector e corrige problemas automaticamente
+    """
+    problemas_encontrados = []
+    
+    # Teste 1: Verificar se o detector tem características básicas
+    if not hasattr(detector, 'caracteristicas_sistema'):
+        problemas_encontrados.append("Detector não possui características do sistema")
+        return False, problemas_encontrados
+    
+    # Teste 2: Verificar se o IVI é válido
+    try:
+        ivi = detector.caracteristicas_sistema.get('ivi', None)
+        if ivi is None:
+            problemas_encontrados.append("IVI não encontrado nas características")
+        else:
+            ivi_float = float(ivi)
+            if ivi_float < 0 or ivi_float > 1000:  # Limite razoável
+                problemas_encontrados.append(f"IVI com valor suspeito: {ivi_float}")
+    except (ValueError, TypeError):
+        problemas_encontrados.append("IVI não é um número válido")
+    
+    # Teste 3: Verificar se métodos básicos existem
+    metodos_essenciais = ['_garantir_parametros_ivi', 'gerar_dados_modelo']
+    for metodo in metodos_essenciais:
+        if not hasattr(detector, metodo):
+            problemas_encontrados.append(f"Método essencial '{metodo}' não encontrado")
+    
+    # Teste 4: Verificar dados padrão
+    if not hasattr(detector, 'dados_coleipa'):
+        problemas_encontrados.append("Dados de Coleipa não encontrados")
+    
+    return len(problemas_encontrados) == 0, problemas_encontrados
+
 def aplicacao_principal():
     """Função principal da aplicação Streamlit"""
     st.title("💧 Sistema de Detecção de Vazamentos - SAAP Coleipa")
@@ -1365,9 +1449,31 @@ def aplicacao_principal():
     detector = obter_detector_seguro(arquivo_uploaded)
     
     # Teste de integridade do detector
-    if not hasattr(detector, 'caracteristicas_sistema'):
-        st.error("❌ Detector não foi inicializado corretamente. Tentando recriar...")
-        detector = DetectorVazamentosColeipa(arquivo_uploaded)
+    integridade_ok, problemas = testar_integridade_detector(detector)
+    
+    if not integridade_ok:
+        st.sidebar.error("❌ Problemas detectados no sistema")
+        with st.sidebar.expander("Ver problemas"):
+            for problema in problemas:
+                st.sidebar.text(f"• {problema}")
+        
+        # Tentar recriar detector
+        st.sidebar.warning("Tentando recriar detector...")
+        try:
+            obter_detector.clear()
+            detector = DetectorVazamentosColeipa(arquivo_uploaded)
+            detector._garantir_parametros_ivi()
+            
+            # Testar novamente
+            integridade_ok2, problemas2 = testar_integridade_detector(detector)
+            if integridade_ok2:
+                st.sidebar.success("✅ Detector recriado com sucesso")
+            else:
+                st.sidebar.error("❌ Problemas persistem após recriação")
+        except Exception as e:
+            st.sidebar.error(f"❌ Erro ao recriar detector: {e}")
+    else:
+        st.sidebar.success("✅ Sistema funcionando corretamente")
     
     # Modelo para download na barra lateral
     st.sidebar.markdown("---")
@@ -1390,23 +1496,30 @@ def aplicacao_principal():
     st.sidebar.markdown("---")
     st.sidebar.subheader("Status do Sistema")
     
-    # Verificar integridade do detector
-    if hasattr(detector, 'caracteristicas_sistema') and hasattr(detector, 'classificar_ivi'):
-        st.sidebar.success("✅ Detector carregado corretamente")
+    # Verificar integridade usando a função de teste
+    integridade_ok_sidebar, _ = testar_integridade_detector(detector)
+    
+    if integridade_ok_sidebar:
+        st.sidebar.success("✅ Sistema operacional")
         ivi_atual = validar_ivi(detector)
         classificacao = classificar_ivi_manual(ivi_atual)
         
         status_ivi = f"{classificacao['emoji']} IVI: {classificacao['categoria_simples']}"
         st.sidebar.info(f"{status_ivi} ({ivi_atual:.2f})")
     else:
-        st.sidebar.error("❌ Problema no detector")
+        st.sidebar.warning("⚠️ Sistema com problemas")
     
     if st.sidebar.button("🔄 Limpar Cache (se houver erros)"):
         try:
             obter_detector.clear()
             st.sidebar.success("Cache limpo! Recarregue a página.")
+            st.experimental_rerun()
         except Exception as e:
             st.sidebar.warning(f"Erro ao limpar cache: {e}")
+            try:
+                st.rerun()
+            except:
+                st.sidebar.info("Recarregue a página manualmente")
     
     # Conteúdo principal baseado na página selecionada
     if pagina_selecionada == "Início":
@@ -1743,10 +1856,30 @@ def mostrar_pagina_mapa_calor(detector):
     st.header("🔥 Mapas de Calor IVI")
     st.markdown("Análise de risco para diferentes combinações de vazão e pressão, considerando diferentes valores de IVI")
     
-    # Mostrar IVI atual calculado no topo da página com função utilitária segura
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        exibir_ivi_status(detector, "IVI ATUAL DO SISTEMA")
+    # Verificação de segurança para evitar erros de cache
+    try:
+        # Mostrar IVI atual calculado no topo da página com função utilitária segura
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            exibir_ivi_status(detector, "IVI ATUAL DO SISTEMA")
+    except Exception as e:
+        st.error(f"⚠️ Erro ao exibir IVI: {e}")
+        st.info("Tentando recarregar dados do detector...")
+        
+        # Fallback manual
+        try:
+            ivi_atual = float(detector.caracteristicas_sistema.get('ivi', 16.33))
+            if ivi_atual > 16:
+                st.error(f"🚨 **IVI ATUAL DO SISTEMA: {ivi_atual:.2f}** - Categoria D (Muito Ruim)")
+            elif ivi_atual > 8:
+                st.warning(f"⚠️ **IVI ATUAL DO SISTEMA: {ivi_atual:.2f}** - Categoria C (Ruim)")
+            elif ivi_atual > 4:
+                st.info(f"ℹ️ **IVI ATUAL DO SISTEMA: {ivi_atual:.2f}** - Categoria B (Regular)")
+            else:
+                st.success(f"✅ **IVI ATUAL DO SISTEMA: {ivi_atual:.2f}** - Categoria A (Bom)")
+        except Exception as e2:
+            st.error(f"❌ Erro crítico ao acessar dados: {e2}")
+            st.stop()
     
     # Configuração do mapa de calor
     st.subheader("Configuração")
@@ -1797,12 +1930,31 @@ def mostrar_pagina_mapa_calor(detector):
     
     with col2:
         st.markdown(f"##### 🎯 Análise específica Coleipa (IVI = {ivi_atual:.2f}):")
+        
+        # Definir interpretação baseada na categoria
+        if classificacao_ivi['categoria_simples'] == 'BOM':
+            perdas_interpretacao = "Perdas próximas às inevitáveis"
+            zona_mapa = "zona verde (baixo risco)"
+            prioridade = "manutenção preventiva"
+        elif classificacao_ivi['categoria_simples'] == 'REGULAR':
+            perdas_interpretacao = f"Perdas {ivi_atual:.1f}x maiores que as inevitáveis"
+            zona_mapa = "zona amarela (risco moderado)"
+            prioridade = "melhorias graduais"
+        elif classificacao_ivi['categoria_simples'] == 'RUIM':
+            perdas_interpretacao = f"Perdas {ivi_atual:.1f}x maiores que as inevitáveis"
+            zona_mapa = "zona laranja (risco alto)"
+            prioridade = "ações urgentes necessárias"
+        else:  # MUITO RUIM
+            perdas_interpretacao = f"Perdas {ivi_atual:.1f}x maiores que as inevitáveis"
+            zona_mapa = "zona vermelha (risco crítico)"
+            prioridade = "detecção e reparo imediato de vazamentos"
+        
         st.markdown(f"""
-        - Perdas reais são {ivi_atual:.2f} vezes maiores que as inevitáveis
+        - {perdas_interpretacao}
         - Potencial de redução de perdas > 400 L/ligação.dia
-        - Localização no mapa: zona vermelha (risco alto)
+        - Localização no mapa: {zona_mapa}
         - Combinação crítica: Vazão ALTA + Pressão BAIXA
-        - Prioridade máxima: detecção e reparo imediato de vazamentos
+        - Prioridade máxima: {prioridade}
         """)
     
     st.markdown("##### 🔧 Impacto visual nos mapas:")
@@ -1818,7 +1970,9 @@ def mostrar_pagina_mapa_calor(detector):
         st.markdown("**IVI RUIM (12.0):**  \nAmarelo-laranja (risco alto)")
     
     with col4:
-        st.markdown(f"**IVI MUITO RUIM ({ivi_atual:.2f}):**  \nVermelho intenso (risco crítico)")
+        # Usar classificação dinâmica para o IVI atual
+        categoria_cor = "Vermelho intenso" if classificacao_ivi['categoria_simples'] == 'MUITO RUIM' else "Variável conforme categoria"
+        st.markdown(f"**IVI {classificacao_ivi['categoria_simples']} ({ivi_atual:.2f}):**  \n{categoria_cor} (risco conforme categoria)")
 
 
 def mostrar_pagina_simulacao(detector):
